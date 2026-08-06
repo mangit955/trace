@@ -44,7 +44,12 @@ export const alertKind = defineEvidenceKind({
     },
   ],
   identity: (p) => `${p.source}:${p.externalId}`,
-  summarize: (p) => `[${p.severity}] ${p.title} on ${p.service} (via ${p.source})`,
+  summarize: (p) => {
+    // Real PagerDuty and Datadog titles usually embed the service already, so appending it
+    // unconditionally yields "Elevated 5xx rate on payments-api on payments-api".
+    const scope = p.title.includes(p.service) ? '' : ` on ${p.service}`;
+    return `[${p.severity}] ${p.title}${scope} (via ${p.source})`;
+  },
   timestamps: (p) => ({
     occurredAt: new Date(p.firedAt),
     observedAt: p.recordedAt === undefined ? undefined : new Date(p.recordedAt),

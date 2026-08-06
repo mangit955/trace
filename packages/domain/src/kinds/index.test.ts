@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { EvidenceKindRegistry } from '../registry.ts';
 import { assertValidEvidenceKind } from '../testing/conformance.ts';
 import {
+  alertKind,
   CORE_KINDS,
   configChangeKind,
   logPatternKind,
@@ -38,6 +39,32 @@ describe('the core kind set', () => {
     for (const def of CORE_KINDS) {
       expect(registry.isCore(def.kind)).toBe(true);
     }
+  });
+});
+
+describe('alert summaries read cleanly', () => {
+  const base = {
+    source: 'pagerduty',
+    externalId: 'INC-481',
+    severity: 'critical',
+    service: 'payments-api',
+    firedAt: '2026-08-06T10:16:00.000Z',
+  };
+
+  test('names the affected service when the title omits it', () => {
+    const summary = alertKind.summarize(
+      alertKind.schema.parse({ ...base, title: 'Elevated 5xx rate' }),
+    );
+    expect(summary).toContain('payments-api');
+  });
+
+  test('does not repeat the service when the title already names it', () => {
+    // PagerDuty and Datadog titles usually embed the service, so appending it unconditionally
+    // produces "Elevated 5xx rate on payments-api on payments-api" in most real alerts.
+    const summary = alertKind.summarize(
+      alertKind.schema.parse({ ...base, title: 'Elevated 5xx rate on payments-api' }),
+    );
+    expect(summary.match(/payments-api/g)).toHaveLength(1);
   });
 });
 
