@@ -216,9 +216,40 @@ The spine. Zod only, zero I/O.
       natively as a heading, fields, timeline list and deep-link buttons, and Caspian auto-threading
       each reply. Reading that conversation is what caught the `/start` and ack defects, and timing
       it is what caught follow-ups re-reasoning (40s → 1ms).
-- [ ] Slack remains connected-but-unexercised: `installSlack()` returns an `authorize_url` needing
-      a browser click. The handler is channel-agnostic and tested on both, but no Slack message has
-      actually been delivered.
+- [x] **Slack install path hardened and exercised against the live gateway.** `installSlack()` was
+      the one part of `apps/agent` with no test at all, and reading it found three defects: every
+      start minted a *new* connection (orphan installs, a fresh dead `authorize_url` each boot);
+      the startup log said `connected` for a status that was not; and `connections[0]` was used as
+      the outbound alert connection, which would page nobody the moment a pending Slack sorted
+      first. `connectChannels` now reuses `SLACK_CONNECTION_ID`, brands the install, and
+      `outboundConnection()` requires `active`. Verified live: the first start printed the URL and
+      the id to save; the restart printed neither.
+- [x] The gateway's pre-approval status is **`pending_oauth`**, not `pending` — checked live. Every
+      check is written `=== 'active'`; the natural `!== 'pending'` would have read an unapproved
+      install as connected. The kind of assumption a test written from the same belief cannot catch.
+- [x] A saved `SLACK_CONNECTION_ID` pointing at an unapproved connection stranded the operator:
+      `getConnection` returns **no** `authorize_url` — only the install call does — so there was
+      nothing left to click and the only escape was editing `.env` by hand. Found by hitting it,
+      not by reading it. `connectChannels` now re-installs when the saved connection is not active.
+- [x] `awaitActive()` polls an OAuth connection to `active` without blocking startup, so Telegram
+      stays live while a human clicks. Confirmed live: `listen()` was already running and picked up
+      the activation with no restart (`[trace] slack is live`). Its 20-minute bound also fired for
+      real when an install went unapproved, which is the branch working, not failing.
+- [ ] **No Slack message has ever been delivered — the block is upstream of Trace.** The connection
+      reaches `active` (`conn_ce5409…`, `slack:trace`, capabilities include `receive`, bound to the
+      same `agt_…` as the working Telegram connection, `error: null`). But across four distinct
+      Slack triggers — a plain channel message, a real `@`-mention chip, removing the app, and
+      re-adding it — the gateway recorded **zero** events. Paged explicitly with `afterSeq`, the
+      stream holds only `connection.authorized` / `connection.active`, which come from the OAuth
+      *redirect*, not from Slack's Events API. Conclusion: Caspian's shared Slack app is not
+      receiving Events API deliveries for this workspace. A second install is impossible while the
+      first holds the identity (`slack identity 'A0BHGF3UR54:T0BNB4ZHK6X' is already connected`),
+      and the SDK exposes no `deleteConnection` to release it. Nothing in this repo can fix it;
+      raise it with Caspian.
+- [ ] Consequently unverified, and not claimed: Slack mrkdwn rendering of the blocks, the `Why?`
+      button through `onInteraction` on Slack, follow-up timings on Slack, and whether the
+      `display_name: 'Trace'` branding took — the app appears as `trace-helper`, and the gateway
+      returns `display_name: undefined`, so it likely did not.
 
 ## Phase 5 — `packages/db`
 
@@ -238,7 +269,10 @@ The spine. Zod only, zero I/O.
 - [ ] `bun run dev` — in-memory, no Docker, no credentials, fully working agent
 - [ ] `docker compose up` — Postgres path
 - [ ] `.env.example` — `CASPIAN_API_KEY` (free/instant, the only required one), `GEMINI_API_KEY`,
-      `TELEGRAM_BOT_TOKEN`, `GITHUB_TOKEN`, `TRACE_ONCALL_RECIPIENTS`, `DATABASE_URL`
+      `TELEGRAM_BOT_TOKEN`, `GITHUB_TOKEN`, `TRACE_ONCALL_RECIPIENTS`, `DATABASE_URL`,
+      `TRACE_ENABLE_SLACK`, `SLACK_CONNECTION_ID` (printed by the first Slack install; saving it is
+      what stops the next start minting a second one), `TRACE_SLACK_DISPLAY_NAME`,
+      `TRACE_SLACK_ICON_URL`, `TRACE_ALERT_PORT`
 - [ ] README: problem, quickstart, how to talk to it, architecture, the four-criteria write-up,
       honest statement of which mode a reviewer is seeing (recorded vs live), and the note that
       free LLM tiers train on prompts so production must not point one at real telemetry
@@ -257,7 +291,10 @@ The spine. Zod only, zero I/O.
       `investigate INC-481`, and `why` resolves to that thread. Also verified over live Telegram
       with credentials present.
 - [ ] Same flow against `docker compose up` with Postgres
-- [ ] Multi-channel: same investigation reachable from Telegram and Slack through one handler
+- [ ] Multi-channel: same investigation reachable from Telegram and Slack through one handler.
+      Proven in test — one script driven through both channels asserts identical `text` *and*
+      `blocks` — and live on Telegram, but **not** live on Slack: no Slack message has ever reached
+      the gateway (see Phase 4). Blocked upstream, not by the handler.
 - [ ] Collector failure path: break credentials, investigation still completes and reports the gap
 - [ ] Rate-limit path: simulate `429`, investigation still completes via recorded fallback
 - [ ] `git log -p | grep` for secrets — nothing sensitive committed

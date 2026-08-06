@@ -101,6 +101,17 @@ export function channelGuideSupplier(
 export interface ChannelConfig {
   telegramBotToken?: string | undefined;
   slack?: boolean;
+  /**
+   * An already-approved Slack connection, from a previous install.
+   *
+   * Slack is not a token you hold, it is an OAuth grant a human clicked once. Without somewhere to
+   * remember which connection that produced, every start would mint a *new* pending connection and
+   * print a *new* authorize_url — the workspace collects orphan installs, and the one line that
+   * matters at first boot becomes noise that never stops.
+   */
+  slackConnectionId?: string | undefined;
+  slackDisplayName?: string | undefined;
+  slackIconUrl?: string | undefined;
 }
 
 /**
@@ -123,17 +134,137 @@ export async function connectChannels(
   }
 
   if (config.slack) {
-    const connection = await connect('slack', () => client.installSlack());
+    const saved = config.slackConnectionId
+      ? await connect('slack', () => client.getConnection(config.slackConnectionId as string))
+      : undefined;
+
+    /**
+     * A saved install that was never approved is a dead end, not a head start.
+     *
+     * `getConnection` returns no `authorize_url` — only the install call does — so pinning to a
+     * connection stuck at `pending_oauth` leaves the operator reading "awaiting approval" forever
+     * with no URL anywhere to click. Minting a fresh one is the only way back, and it is not the
+     * orphan-install problem `slackConnectionId` exists to prevent: that is about re-installing
+     * over a connection that *works*.
+     */
+    const usable = saved?.status === 'active';
+    if (saved && !usable) {
+      console.log(
+        `[trace] the saved Slack install (${saved.id}) was never approved — starting a fresh one.`,
+      );
+    }
+
+    const connection = usable
+      ? saved
+      : await connect('slack', () =>
+          client.installSlack({
+            // Branded, so Trace answers under one identity everywhere rather than under the
+            // gateway's shared app on Slack and its own name on Telegram.
+            ...(config.slackDisplayName ? { displayName: config.slackDisplayName } : {}),
+            ...(config.slackIconUrl ? { iconUrl: config.slackIconUrl } : {}),
+          }),
+        );
+
     if (connection) {
       connections.push(connection);
+
       // Slack's install is an OAuth flow: the connection is not live until a human approves it.
       if (connection.authorize_url) {
         console.log(`[trace] Slack needs approval — open: ${connection.authorize_url}`);
+      }
+      if (!usable) {
+        console.log(
+          `[trace] then save it so the next start reuses this install: SLACK_CONNECTION_ID=${connection.id}`,
+        );
       }
     }
   }
 
   return connections;
+}
+
+/**
+ * Which connection proactive outreach goes out on.
+ *
+ * Anything not `active` cannot deliver — a Slack install nobody has approved will accept an
+ * `initiate()` and page nobody — so an active connection wins regardless of order. This used to be
+ * `connections[0]`, which is correct exactly while Telegram happens to be listed first.
+ *
+ * The fallback is deliberate: with only a pending connection, attempting the page and failing
+ * loudly beats deciding in advance not to try.
+ */
+export function outboundConnection(connections: readonly Connection[]): Connection | undefined {
+  return connections.find((connection) => connection.status === 'active') ?? connections[0];
+}
+
+export interface AwaitActiveOptions {
+  pollIntervalMs?: number;
+  attempts?: number;
+}
+
+/**
+ * Polls an OAuth connection until the human on the other end has approved it.
+ *
+ * `installSlack()` does not go through the SDK's own provisioning wait — it posts once and returns
+ * whatever the gateway currently says — so nothing else notices the moment the install goes live.
+ * Without this, the operator's only signal is a startup line saying `pending`, printed before they
+ * had a chance to click, and never corrected.
+ *
+ * Bounded rather than endless, and its caller does not await it: a human who never clicks must not
+ * hold up the channels that *are* connected, and the poll must not outlive the person's attention
+ * by hours. A gateway error ends the wait — this is a courtesy, not a critical path.
+ *
+ * Checked as `status === 'active'` rather than `!== 'pending'` because the gateway's pre-approval
+ * label is not documented anywhere; only the approved state is. The live gateway turned out to say
+ * `pending_oauth`, which `!== 'pending'` would have read as approved.
+ *
+ * The default bound is twenty minutes because the thing being waited on is a person: creating a
+ * Slack workspace, finding the admin who can approve an app, and clicking through OAuth is not a
+ * five-minute errand, and a poller that gives up first reports "never approved" about an install
+ * that was.
+ */
+export async function awaitActive(
+  client: Pick<CommClient, 'getConnection'>,
+  connection: Connection,
+  options: AwaitActiveOptions = {},
+): Promise<Connection | undefined> {
+  const pollIntervalMs = options.pollIntervalMs ?? 5_000;
+  const attempts = options.attempts ?? 240;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    let current: Connection;
+    try {
+      current = await client.getConnection(connection.id);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error(`[trace] stopped watching the ${label(connection)} install: ${detail}`);
+      return undefined;
+    }
+
+    if (current.status === 'active') {
+      console.log(`[trace] ${label(connection)} is live — approved and receiving messages.`);
+      return current;
+    }
+
+    if (current.status === 'failed') {
+      console.error(
+        `[trace] the ${label(connection)} install failed: ${current.error ?? 'no reason given'}`,
+      );
+      return undefined;
+    }
+
+    if (pollIntervalMs > 0) await Bun.sleep(pollIntervalMs);
+  }
+
+  console.error(
+    `[trace] gave up waiting for the ${label(connection)} install to be approved. ` +
+      'Approve it and start again.',
+  );
+  return undefined;
+}
+
+function label(connection: Connection): string {
+  return connection.channel ?? 'channel';
 }
 
 /**
