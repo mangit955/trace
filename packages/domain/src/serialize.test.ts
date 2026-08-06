@@ -145,6 +145,24 @@ describe('content', () => {
     expect(serializeForReasoning(graph, registry).text).toContain('PRECEDED');
   });
 
+  test('lists relations in label order rather than alphabetically', () => {
+    // Sorting the rendered strings puts E11 before E2, so the relation list stops tracking the
+    // evidence list above it and both a human and the model have to hunt.
+    const a = alert();
+    const logs = Array.from({ length: 10 }, (_, i) => logPattern(`pattern ${i}`));
+    const edge = (from: typeof a.id) =>
+      createEvidenceEdge({ orgId, investigationId, from, to: a.id, relation: 'PRECEDED' });
+    const graph = buildEvidenceGraph({
+      investigationId,
+      nodes: [a, ...logs],
+      edges: [edge(logs[9]?.id ?? a.id), edge(logs[0]?.id ?? a.id)],
+    });
+
+    const { text } = serializeForReasoning(graph, registry);
+
+    expect(text).toContain('E2 PRECEDED E1\nE11 PRECEDED E1');
+  });
+
   test('says so plainly when there is no evidence at all', () => {
     const { text } = serializeForReasoning(graphOf([]), registry);
     expect(text).toMatch(/no evidence/i);

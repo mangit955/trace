@@ -162,6 +162,7 @@ export function serializeForReasoning(
   // down rather than searching.
   const idMap = new Map<string, EvidenceNodeId>();
   const labelOf = new Map<EvidenceNodeId, string>();
+  const positionOf = new Map<EvidenceNodeId, number>();
   let counter = 0;
   for (const title of orderedTitles) {
     for (const node of grouped.get(title) ?? []) {
@@ -169,6 +170,7 @@ export function serializeForReasoning(
       const label = `E${counter}`;
       idMap.set(label, node.id);
       labelOf.set(node.id, label);
+      positionOf.set(node.id, counter);
     }
   }
 
@@ -183,10 +185,20 @@ export function serializeForReasoning(
   }
 
   // Only relations between included nodes; an edge to elided evidence would be uncitable.
+  //
+  // Ordered by label position rather than by the rendered string, which would sort E11 above E2
+  // and leave the relation list out of step with the evidence above it. Sorting on the edge itself
+  // (not on collector order) is what keeps the text byte-identical run to run.
+  const position = (id: EvidenceNodeId) => positionOf.get(id) ?? Number.MAX_SAFE_INTEGER;
   const relations = graph.edges
     .filter((edge) => labelOf.has(edge.from) && labelOf.has(edge.to))
-    .map((edge) => `${labelOf.get(edge.from)} ${edge.relation} ${labelOf.get(edge.to)}`)
-    .sort();
+    .sort(
+      (a, b) =>
+        position(a.from) - position(b.from) ||
+        position(a.to) - position(b.to) ||
+        a.relation.localeCompare(b.relation),
+    )
+    .map((edge) => `${labelOf.get(edge.from)} ${edge.relation} ${labelOf.get(edge.to)}`);
 
   if (relations.length > 0) {
     parts.push('## Relations', ...relations, '');
