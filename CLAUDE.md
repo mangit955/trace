@@ -135,9 +135,35 @@ dates. Add it to `CORE_KINDS` and it is exercised automatically.
 
 ## Verification beyond tests
 
-For anything whose output a human or an LLM reads, render it and read it. A serializer bug that
-produced `Elevated 5xx rate on payments-api on payments-api` passed the entire suite; it was found
-by printing a sample graph. Tests passing is not sufficient evidence that output is correct.
+**A green suite is evidence that the tests pass, not that the code works.** No piece of work is done
+until it has been validated by *running* it, and until every claim made about it has been checked
+against observed output rather than assumed.
+
+For anything a human or an LLM reads, render it and read it. A serializer bug that produced
+`Elevated 5xx rate on payments-api on payments-api` passed the entire suite; it was found by
+printing a sample graph. So was relation ordering that listed `E11` above `E2`.
+
+Then probe the invariants directly — a throwaway script against real fixture data, not the
+two-node synthetic graphs the unit tests use. Delete the script afterwards; whatever it finds
+becomes a test that fails first. Phase 2 shipped green and had three further defects: edges were
+not deduplicated though nodes were, so one fact read to the model as two independent observations;
+a commit with no author block threw out of a date parse and cost the whole GitHub collector every
+deploy it had already found; and the seeded and live GitHub collectors collided on one name, so
+the report said "github was not consulted" beside three nodes of GitHub evidence.
+
+That last one is the general lesson. **A test written from the same assumption as the code cannot
+catch that assumption being wrong** — the smoke test asserted the contradiction as correct. Ask
+what would have to be true for the output to be wrong *despite* the suite passing, then go check
+that thing by running it.
+
+Before reporting any work complete:
+
+- `bun test`, `bun run typecheck`, `bun run lint` — all three, and read the output.
+- Render every human- or model-facing surface the change touches, and read it end to end.
+- Exercise the failure paths: a source that throws, hangs, is unconfigured, returns nothing.
+- Compose the pieces the way the *next* phase will wire them, not the way the test does.
+- Report findings as observed output. "Verified" without a command and its result is an assumption,
+  and saying it is done when it is merely green is the one failure that costs a reviewer's trust.
 
 ## Constraints
 
