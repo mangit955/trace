@@ -127,10 +127,22 @@ The spine. Zod only, zero I/O.
       commits in-window), `githubCollectorFromEnv` always returns it so "no token" is a stated gap
       rather than silence. Non-terminal deployments are dropped rather than guessed; commit bodies
       are cut to the subject line before anything reaches a third-party model.
-- [x] Tests: 36 green — partial failure yields a usable graph plus a recorded gap, wedged collector
-      is abandoned, credential-free run reports `github was not consulted: GITHUB_TOKEN is not set`.
-- [x] Found by rendering the seeded graph (not by tests): the serializer sorted relations as
-      strings, listing `E11` before `E2`. Fixed in `packages/domain/src/serialize.ts` with a test.
+- [x] `src/compose.ts` — `selectCollectors({ seeded, live })`, the demo/production switch. A live
+      connector wins its name only once it is configured; an unconfigured one whose seed covers it
+      is dropped rather than reported as a gap that contradicts the evidence beside it.
+- [x] Tests: 48 green — partial failure yields a usable graph plus a recorded gap, wedged collector
+      is abandoned, credential-free run reports no gaps, configured GitHub replaces its seed.
+- [x] Validation pass, by running the code rather than the suite. Four defects, all now tested:
+      1. Serializer sorted relations as strings (`E11` before `E2`) — found by printing a graph.
+      2. Edges were not deduplicated though nodes were, so two collectors reporting one fact
+         printed it twice, reading to the model as two independent observations.
+      3. A commit with no author block threw out of `isoOf` and failed the whole GitHub collector,
+         losing every deploy and PR it had already found.
+      4. Seeded + live GitHub collided on the name `github`, producing "github was not consulted"
+         beside three nodes of GitHub evidence — asserted as correct by the smoke test.
+      Verified holding: tenancy on every node/edge, provenance to a real run, determinism across
+      100 shuffled runs, budget elision keeping the alert, hallucinated citations rejected,
+      terminal states terminal, no unhandled rejection when a collector rejects after its deadline.
 
 ## Phase 3 — `packages/reasoner`
 
