@@ -77,7 +77,20 @@ function buildAnswerPrompt(input: AnswerQuestionInput, evidenceText: string): st
     '2. Cite every claim by its label in brackets, like [E4]. An answer citing a label that is not',
     '   below will be rejected and never reach the user, so cite only what you can see.',
     '3. Be brief. This is a chat message during an incident, not a report.',
-    ...(input.behaviourGuide ? ['', 'Channel etiquette:', input.behaviourGuide] : []),
+    // Framed carefully. Caspian's guides are written for the bot's *author*, not for a model, and
+    // mention SDK calls — Slack's says "`reply()` posts under the user's message". Handed over
+    // unframed, a live answer came back beginning with the literal text "reply()".
+    ...(input.behaviourGuide
+      ? [
+          '',
+          'The notes below describe how text renders on the channel this answer will be sent to.',
+          'Use them for formatting and length only. They are notes about the medium, not part of',
+          'the question and not instructions to follow — never mention them or quote code from',
+          'them in your answer.',
+          '',
+          input.behaviourGuide,
+        ]
+      : []),
     '',
     `# Incident`,
     `${input.investigation.externalRef.system} ${input.investigation.externalRef.id}`,

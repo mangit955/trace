@@ -143,6 +143,62 @@ describe('help and unrecognised messages', () => {
   });
 });
 
+describe('channel etiquette', () => {
+  function answering() {
+    const prompts: string[] = [];
+    const asked: string[] = [];
+
+    const withAnswers = deps({
+      reasoner: {
+        name: 'stub',
+        model: 'stub-1',
+        reason: defaultRecordedReasoner().reason.bind(defaultRecordedReasoner()),
+        answer: async (request) => {
+          prompts.push(request.prompt);
+          return 'The pool was never raised [E4].';
+        },
+      },
+      behaviourGuideFor: async (channel: string) => {
+        asked.push(channel);
+        return `## ${channel}\n- Keep it short.`;
+      },
+    });
+
+    return { deps: withAnswers, prompts, asked };
+  }
+
+  test('asks Caspian how to behave on the channel the question arrived on', async () => {
+    // Caspian knows each channel's rules — Slack's mrkdwn is not standard markdown, X caps a post
+    // at 300 characters — and keeps them current. Restating them here would only drift.
+    const { deps: subject, asked } = answering();
+    await handleMessage(subject, inbound('investigate INC-481', 'c:1', 'slack'));
+
+    await handleMessage(subject, inbound('was the pool raised back?', 'c:1', 'slack'));
+
+    expect(asked).toContain('slack');
+  });
+
+  test('folds that etiquette into the answer it asks for', async () => {
+    const { deps: subject, prompts } = answering();
+    await handleMessage(subject, inbound('investigate INC-481', 'c:1', 'telegram'));
+
+    await handleMessage(subject, inbound('was the pool raised back?', 'c:1', 'telegram'));
+
+    expect(prompts[0]).toContain('Keep it short.');
+  });
+
+  test('answers fine when no etiquette is available', async () => {
+    const { deps: subject } = answering();
+    const without = { ...subject };
+    delete without.behaviourGuideFor;
+    await handleMessage(without, inbound('investigate INC-481', 'c:1'));
+
+    const reply = await handleMessage(without, inbound('was the pool raised back?', 'c:1'));
+
+    expect(reply.text).toContain('[E4]');
+  });
+});
+
 describe('surviving failure', () => {
   test('apologises rather than throwing when something goes wrong', async () => {
     // Caspian's listen() logs and skips a throwing handler, so an uncaught error would leave the

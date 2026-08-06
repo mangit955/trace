@@ -8,6 +8,8 @@
   ],
   "scripts": {
     "test": "bun test",
+    "dev": "bun run apps/agent/src/repl.ts",
+    "start": "bun run apps/agent/src/main.ts",
     "typecheck": "bun run --filter '*' typecheck",
     "lint": "biome check .",
     "format": "biome check --write .",

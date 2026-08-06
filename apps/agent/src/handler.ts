@@ -39,8 +39,15 @@ export interface AgentDeps {
   clock: Clock;
   /** Defaults to the real parallel runner; a seam for tests that need collection itself to fail. */
   collect?: (input: CollectEvidenceInput) => Promise<CollectionResult>;
-  /** Caspian's channel etiquette, folded into free-form answers. */
-  behaviourGuide?: string;
+  /**
+   * Caspian's etiquette for a given channel, folded into free-form answers.
+   *
+   * A supplier rather than a string, because the rules differ per channel — Slack's mrkdwn is not
+   * standard markdown, X caps a post at 300 characters — and Caspian maintains them so this repo
+   * does not have to and cannot drift. Asking for etiquette is not the handler branching on
+   * channel: the same code path runs either way, only the wording guidance differs.
+   */
+  behaviourGuideFor?: (channel: string) => Promise<string | undefined>;
 }
 
 /**
@@ -189,13 +196,14 @@ async function answer(deps: AgentDeps, message: InboundMessage, question: string
   if (!investigation) return renderHelp();
 
   try {
+    const behaviourGuide = await deps.behaviourGuideFor?.(message.channel);
     const text = await answerQuestion({
       question,
       investigation,
       graph: await deps.store.evidence.loadGraph(deps.tenant, investigation.id),
       registry: deps.registry,
       reasoner: deps.reasoner,
-      ...(deps.behaviourGuide === undefined ? {} : { behaviourGuide: deps.behaviourGuide }),
+      ...(behaviourGuide === undefined ? {} : { behaviourGuide }),
     });
     return { text };
   } catch {

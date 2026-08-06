@@ -58,6 +58,38 @@ export function attachHandlers(client: CommClient, deps: AgentDeps): void {
   });
 }
 
+/**
+ * Caspian's own etiquette for a channel, fetched once per channel and kept.
+ *
+ * `channelGuide()` returns the real rules — that Slack renders mrkdwn rather than markdown, that
+ * Telegram wants short and personal — and Caspian keeps them current. Encoding them here would
+ * mean maintaining a copy that silently drifts as channels change.
+ *
+ * Memoised because the guidance is stable for the life of the process, and a network round trip on
+ * every message during an incident is exactly the wrong time to spend one. A failure is not worth
+ * failing a reply over: the answer is simply written without channel-specific advice.
+ */
+export function channelGuideSupplier(
+  client: CommClient,
+): (channel: string) => Promise<string | undefined> {
+  const cache = new Map<string, Promise<string | undefined>>();
+
+  return (channel: string) => {
+    const cached = cache.get(channel);
+    if (cached) return cached;
+
+    const pending = client
+      .channelGuide(channel)
+      // The gateway returns an empty guide for channels it has nothing specific to say about, and
+      // an empty instruction block in a prompt is noise.
+      .then((guide) => (guide.trim().length > 0 ? guide : undefined))
+      .catch(() => undefined);
+
+    cache.set(channel, pending);
+    return pending;
+  };
+}
+
 export interface ChannelConfig {
   telegramBotToken?: string | undefined;
   slack?: boolean;

@@ -121,6 +121,20 @@ describe('answerQuestion', () => {
     expect(prompt).toContain('Elevated 5xx rate on payments-api');
   });
 
+  test('frames the channel guide as formatting advice, not as instructions to follow', async () => {
+    // Caspian's guides are written for the bot *author* and mention SDK calls: Slack's says
+    // "`reply()` posts under the user's message". Handed to a model unframed, it treats that as
+    // content — a live answer came back beginning with the literal text "reply()".
+    let prompt = '';
+    await ask(
+      answering('Yes [E1].', (p) => {
+        prompt = p;
+      }),
+    );
+
+    expect(prompt).toMatch(/formatting and length|do not follow|never mention/i);
+  });
+
   test('passes the channel behaviour guide through, so etiquette is the channel’s own', async () => {
     let prompt = '';
     await ask(

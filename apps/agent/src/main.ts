@@ -1,7 +1,7 @@
-import { CommClient, CommError } from 'caspian-sdk';
+import { CommClient } from 'caspian-sdk';
 import { type AlertIngress, receiveAlert } from './alert-ingress.ts';
 import { recipientsFrom } from './alerts.ts';
-import { ACK, attachHandlers, connectChannels } from './caspian.ts';
+import { ACK, attachHandlers, channelGuideSupplier, connectChannels } from './caspian.ts';
 import { buildDeps } from './wiring.ts';
 
 /**
@@ -25,15 +25,11 @@ if (!env['CASPIAN_API_KEY']) {
 const deps = buildDeps(env);
 const client = new CommClient({ apiKey: env['CASPIAN_API_KEY'] });
 
-// Caspian knows each channel's etiquette — X's character cap, iMessage's lack of markdown — far
-// better than a constant in this repo would, and it stays current without anyone maintaining it.
-// Folded into free-form answers only; structured reports are rendered deterministically.
-try {
-  deps.behaviourGuide = await client.behaviorPrompt();
-} catch (error) {
-  const detail = error instanceof CommError ? error.detail : String(error);
-  console.warn(`[trace] could not fetch channel etiquette, continuing without it: ${detail}`);
-}
+// Caspian knows each channel's etiquette — that Slack renders mrkdwn rather than markdown, that X
+// caps a post at 300 characters — far better than a constant in this repo would, and it stays
+// current without anyone maintaining it. Fetched per channel on first use and folded into
+// free-form answers only; structured reports are rendered deterministically.
+deps.behaviourGuideFor = channelGuideSupplier(client);
 
 const connections = await connectChannels(client, {
   telegramBotToken: env['TELEGRAM_BOT_TOKEN'],

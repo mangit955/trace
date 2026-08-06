@@ -204,10 +204,16 @@ The spine. Zod only, zero I/O.
       fake would encode my own beliefs about the SDK, so a wrong belief would make fake and code
       wrong together. This caught two wire-shape errors (below).
 - [x] Test: empty allowlist ⇒ zero `initiate()` calls.
-- [ ] **Unverified:** no `CASPIAN_API_KEY` in this environment, so live delivery over Telegram/Slack
-      has never been exercised. Everything is tested to the transport boundary. `installSlack()`
-      also returns an `authorize_url` needing a browser click, so Telegram is the realistically
-      verifiable channel. Closes in one run once a key exists.
+- [x] Verified against the **live Caspian gateway** with a real `CASPIAN_API_KEY`: authentication,
+      `channels()` (email, discord, slack, x, telegram, phone, bluesky, gmeet),
+      `listConversations()`, and `channelGuide()` per channel. Found that `behaviorPrompt()` returns
+      empty until an agent is configured while `channelGuide(channel)` has real content, so
+      etiquette is now fetched per channel and memoised.
+- [x] Root `dev` / `start` scripts, because Bun loads `.env` from the **working directory** while
+      module resolution follows the file — running from `apps/` silently dropped every credential.
+- [ ] **Still unverified:** delivery of a message over a real channel. Telegram needs
+      `TELEGRAM_BOT_TOKEN`; Slack's `installSlack()` returns an `authorize_url` needing a browser
+      click. Everything up to the transport is exercised against the live gateway.
 
 ## Phase 5 — `packages/db`
 
