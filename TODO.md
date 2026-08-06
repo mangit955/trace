@@ -70,12 +70,15 @@ The spine. Zod only, zero I/O.
       Core kinds bare, plugin kinds dotted, `kind@version` uniqueness, kind-name and version
       validation, `parse` strips unknown keys (collector output is untrusted). 27 tests green.
 - [ ] Add remaining branded ids as consumed (`CollectorRunId`, `HypothesisId`, `ServiceId`)
-- [ ] `src/kinds/*.ts` — 10 core kinds: `alert`, `deployment`, `pull_request`, `commit`,
-      `metric_series`, `log_pattern`, `config_change`, `feature_flag_change`, `service`,
-      `past_incident`. One small file each. `log_pattern` and `metric_series` must structurally
-      cap payload size.
-- [ ] `src/testing/conformance.ts` — exported `assertValidEvidenceKind(def)` suite plugin authors
-      can run; exercise every core kind through it in CI
+- [x] `src/testing/conformance.ts` — exported `assertValidEvidenceKind(def)` suite plugin authors
+      can run; every core kind exercised through it. Checks naming, examples, schema strength
+      (rejects `z.any()`), identity/summarize determinism, bounded summaries, valid dates, URLs.
+      *Built before the kinds so each kind's test is "passes conformance".*
+- [x] `src/kinds/*.ts` — 10 core kinds grouped by family rather than one file each:
+      `change.ts` (deployment, pull_request, commit, config_change, feature_flag_change),
+      `signal.ts` (alert, metric_series, log_pattern), `context.ts` (service, past_incident).
+      `metric_series` caps at `MAX_METRIC_POINTS`; `log_pattern` has no raw-lines field at all.
+      `config_change` carries a `redacted` flag so credential values never reach prompt text.
 - [ ] `src/entities/investigation.ts` — `Investigation` + status state machine
       (`pending → collecting → reasoning → ready | failed`), illegal transitions rejected
 - [ ] `src/entities/evidence.ts` — `EvidenceNode` (provenance: connector, collector run,

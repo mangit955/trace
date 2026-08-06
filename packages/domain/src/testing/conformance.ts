@@ -1,4 +1,4 @@
-import type { EvidenceKindDefinition } from '../registry.ts';
+import type { AnyEvidenceKindDefinition } from '../registry.ts';
 
 /**
  * Conformance suite for evidence kind definitions.
@@ -30,7 +30,7 @@ function isValidDate(value: Date): boolean {
   return value instanceof Date && !Number.isNaN(value.getTime());
 }
 
-export function assertValidEvidenceKind<T>(definition: EvidenceKindDefinition<T>): void {
+export function assertValidEvidenceKind(definition: AnyEvidenceKindDefinition): void {
   const { kind, version, schema, examples } = definition;
 
   if (!KIND_NAME.test(kind)) {

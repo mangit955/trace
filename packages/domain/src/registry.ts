@@ -43,7 +43,7 @@ export interface EvidenceKindDefinition<T = unknown> {
  * at the boundary by `parse()`, which validates through the definition's own schema.
  */
 // biome-ignore lint/suspicious/noExplicitAny: heterogeneous registry, see above
-type AnyEvidenceKindDefinition = EvidenceKindDefinition<any>;
+export type AnyEvidenceKindDefinition = EvidenceKindDefinition<any>;
 
 /**
  * Dot-separated segments, each starting with a lowercase letter.
