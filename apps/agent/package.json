@@ -13,6 +13,7 @@
     "@trace/db": "workspace:*",
     "@trace/domain": "workspace:*",
     "@trace/reasoner": "workspace:*",
-    "caspian-sdk": "^0.6.1"
+    "caspian-sdk": "^0.6.1",
+    "zod": "^4.1.13"
   }
 }

@@ -188,8 +188,10 @@ The spine. Zod only, zero I/O.
       provider-neutral, so every reply carries plain text *and* blocks and the channel decides.
       Buttons deep-link to the real deploy/PR/commit/incident; a `Why?` callback button routes back
       through `onInteraction`.
-- [x] `src/alerts.ts` — `initiate()` to the `TRACE_ONCALL_RECIPIENTS` allowlist only, once per
-      incident, and **nothing at all** when the allowlist is unset.
+- [x] `src/alerts.ts` + `src/alert-ingress.ts` — `initiate()` to the `TRACE_ONCALL_RECIPIENTS`
+      allowlist only, once per incident, and **nothing at all** when the allowlist is unset. Served
+      from `Bun.serve` in `main.ts` behind `TRACE_ALERT_PORT`. The page carries the finding, not a
+      promise to investigate: the reconstruction is already done by the time anyone is woken up.
 - [x] Typed errors: `AccountRequiredError` → "run `caspian login`"; `InsufficientCreditError` →
       the balance; `CommError` → status and detail. A failed channel degrades the agent, never
       kills it.

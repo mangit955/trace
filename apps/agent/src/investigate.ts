@@ -26,6 +26,27 @@ export interface InvestigationOutcome {
   report: InvestigationReport;
 }
 
+/**
+ * Rebuilds the report for an investigation from stored evidence.
+ *
+ * Regenerated rather than cached, which is safe precisely because evidence is immutable and
+ * serialization is deterministic: `E4` means the same node now as it did when the report was first
+ * written, so a follow-up's citations line up with the original.
+ */
+export async function reportForInvestigation(
+  deps: AgentDeps,
+  investigation: Investigation,
+): Promise<InvestigationReport> {
+  return await reasonAboutInvestigation({
+    investigation,
+    graph: await deps.store.evidence.loadGraph(deps.tenant, investigation.id),
+    registry: deps.registry,
+    runs: await deps.store.collectorRuns.listFor(deps.tenant, investigation.id),
+    reasoner: deps.reasoner,
+    now: deps.clock.now(),
+  });
+}
+
 export async function runInvestigation(
   deps: AgentDeps,
   externalRef: ExternalRef,
@@ -33,9 +54,15 @@ export async function runInvestigation(
 ): Promise<InvestigationOutcome> {
   const now = deps.clock.now();
 
-  // Trace mirrors incidents, it does not own them, so an incident already investigated is looked
-  // up rather than duplicated. Re-asking about INC-481 must not fork the evidence.
+  // Trace mirrors incidents, it does not own them, so an incident already reconstructed is shown
+  // again rather than reconstructed twice — and `ready` is a *terminal* state, so re-running one
+  // would mean creating a whole new Investigation. Handled here rather than at each call site,
+  // because both the chat handler and the alert webhook can arrive at an incident already done.
   const existing = await deps.store.investigations.findByExternalRef(deps.tenant, externalRef);
+  if (existing?.status === 'ready') {
+    return { investigation: existing, report: await reportForInvestigation(deps, existing) };
+  }
+
   const investigation =
     existing ??
     createInvestigation({

@@ -30,6 +30,13 @@ export interface OutboundAttempt {
 export interface IncidentAlert {
   externalRef: ExternalRef;
   summary: string;
+  /**
+   * What Trace already worked out, if the reconstruction finished before the page went out.
+   *
+   * The whole point of speaking first is arriving with the answer. A page that only says
+   * "something broke, ask me" is worth less than the alert that triggered it.
+   */
+  finding?: string;
 }
 
 export interface NotifyOnCallInput {
@@ -64,9 +71,13 @@ export async function notifyOnCall(input: NotifyOnCallInput): Promise<void> {
   // round of pages when the webhook is redelivered.
   input.alreadyNotified.add(key);
 
-  const text =
-    `${input.alert.externalRef.id}: ${input.alert.summary}\n\n` +
-    'I am reconstructing what happened. Reply "why" for my reasoning, or ask me anything about it.';
+  const text = [
+    `${input.alert.externalRef.id}: ${input.alert.summary}`,
+    '',
+    input.alert.finding ?? 'I am reconstructing what happened now.',
+    '',
+    'Reply "why" for my reasoning and the evidence, or ask me anything about it.',
+  ].join('\n');
 
   for (const recipient of input.recipients) {
     try {

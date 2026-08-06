@@ -8,14 +8,9 @@ import type {
   Investigation,
   TenantContext,
 } from '@trace/domain';
-import {
-  answerQuestion,
-  type InvestigationReport,
-  type Reasoner,
-  reasonAboutInvestigation,
-} from '@trace/reasoner';
+import { answerQuestion, type InvestigationReport, type Reasoner } from '@trace/reasoner';
 import { parseIntent } from './intent.ts';
-import { runInvestigation } from './investigate.ts';
+import { reportForInvestigation, runInvestigation } from './investigate.ts';
 import type { InboundMessage, Reply } from './message.ts';
 import { renderHelp, renderReasoning, renderReport } from './render.ts';
 
@@ -112,20 +107,8 @@ async function investigate(
     };
   }
 
-  // An incident already reconstructed is shown again rather than reconstructed a second time.
-  // `ready` is a terminal state — evidence is immutable and its citations must keep resolving — so
-  // re-running would mean a *new* investigation, and asking "investigate INC-481" twice is a
-  // request to see the findings, not to spend another collection pass on them.
-  const existing = await deps.store.investigations.findByExternalRef(
-    deps.tenant,
-    seeded.externalRef,
-  );
-  if (existing?.status === 'ready') {
-    await deps.store.conversations.link(deps.tenant, message.conversationId, existing.id);
-    const report = await reportForInvestigation(deps, existing);
-    return renderReport(report, seeded.externalRef.id);
-  }
-
+  // Reuse of an already-reconstructed incident is handled inside runInvestigation, so the chat
+  // handler and the alert webhook cannot drift apart on it.
   const { investigation, report } = await runInvestigation(
     deps,
     seeded.externalRef,
@@ -153,23 +136,6 @@ async function reportFor(
   const investigation = await investigationFor(deps, message);
   if (!investigation) return undefined;
   return await reportForInvestigation(deps, investigation);
-}
-
-async function reportForInvestigation(
-  deps: AgentDeps,
-  investigation: Investigation,
-): Promise<InvestigationReport> {
-  const graph = await deps.store.evidence.loadGraph(deps.tenant, investigation.id);
-  const runs = await deps.store.collectorRuns.listFor(deps.tenant, investigation.id);
-
-  return await reasonAboutInvestigation({
-    investigation,
-    graph,
-    registry: deps.registry,
-    runs,
-    reasoner: deps.reasoner,
-    now: deps.clock.now(),
-  });
 }
 
 async function investigationFor(

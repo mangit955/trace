@@ -5,11 +5,11 @@ import type { Reply } from './message.ts';
 /**
  * Turning a report into something a human reads on their phone at 3am.
  *
- * This is the only channel-aware code in the agent, and it barely has to be. Caspian's `Block[]` is
+ * Notably, this does not look at `message.channel` — nothing in Trace does. Caspian's `Block[]` is
  * provider-neutral: the gateway renders it natively on Slack, Discord and Telegram and degrades it
- * to clean text everywhere else. So instead of writing one renderer per platform — which the
- * challenge explicitly does not count, and which would rot — every reply carries **both** a plain
- * text rendering and the blocks, and the channel decides.
+ * to clean text everywhere else. So rather than one renderer per platform — which the challenge
+ * explicitly does not count, and which would rot — every reply carries **both** a plain text
+ * rendering and the blocks, and the channel decides which it can show.
  *
  * The plain text is written to survive the worst channel in the set: no markdown, hard length caps,
  * no links. That constraint is why nothing here uses `*bold*` or `# headings` — on X or SMS those

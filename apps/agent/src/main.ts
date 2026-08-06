@@ -1,4 +1,6 @@
 import { CommClient, CommError } from 'caspian-sdk';
+import { type AlertIngress, receiveAlert } from './alert-ingress.ts';
+import { recipientsFrom } from './alerts.ts';
 import { ACK, attachHandlers, connectChannels } from './caspian.ts';
 import { buildDeps } from './wiring.ts';
 
@@ -50,6 +52,44 @@ for (const connection of connections) {
 }
 
 attachHandlers(client, deps);
+
+// The only path that can start a conversation with a human, so it is off unless an operator both
+// opens a port and names recipients. Absent either, Trace answers when spoken to and nothing more.
+const alertPort = Number(env['TRACE_ALERT_PORT'] ?? 0);
+const recipients = recipientsFrom(env['TRACE_ONCALL_RECIPIENTS']);
+
+if (alertPort > 0) {
+  const first = connections[0];
+  const ingress: AlertIngress = {
+    agent: deps,
+    recipients,
+    alreadyNotified: new Set<string>(),
+    ...(first ? { outbound: { client, connectionId: first.id } } : {}),
+  };
+
+  Bun.serve({
+    port: alertPort,
+    async fetch(request) {
+      if (request.method !== 'POST') return new Response('POST an alert here', { status: 405 });
+
+      try {
+        const outcome = await receiveAlert(ingress, await request.json());
+        return Response.json(outcome);
+      } catch (error) {
+        // A malformed webhook is the sender's problem to see, not a reason to fall over.
+        const detail = error instanceof Error ? error.message : String(error);
+        return Response.json({ error: detail }, { status: 400 });
+      }
+    },
+  });
+
+  console.log(
+    `[trace] alert webhook on :${alertPort} — ` +
+      (recipients.length > 0
+        ? `will page ${recipients.length} recipient(s) once per incident`
+        : 'TRACE_ONCALL_RECIPIENTS is unset, so it will investigate but page nobody'),
+  );
+}
 
 console.log(`[trace] reasoning: ${deps.reasoner.model}`);
 console.log('[trace] listening.');
