@@ -1,12 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { EvidenceNodeId, InvestigationId, OrgId, newId, uuidv7 } from './ids.ts';
+import { EvidenceNodeId, InvestigationId, newId, OrgId, uuidv7 } from './ids.ts';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 describe('id schemas', () => {
   test('parses a valid uuid into a branded id', () => {
     const raw = '018f4a1c-6b2e-7c3d-9e4f-1a2b3c4d5e6f';
-    expect(OrgId.parse(raw)).toBe(raw);
+    // Widened to string deliberately: the brand exists to stop id types mixing at compile time,
+    // and comparing a branded value against a plain literal is exactly what it prevents.
+    const parsed: string = OrgId.parse(raw);
+    expect(parsed).toBe(raw);
   });
 
   test('rejects a non-uuid string', () => {

@@ -52,9 +52,9 @@ quality, adoption/usage signal, and how idiomatically Caspian is used as the com
 - [x] Root `package.json` (Bun workspaces), `tsconfig.base.json` (strict + `noUncheckedIndexedAccess`
       + `exactOptionalPropertyTypes`), `biome.json`, `.gitignore`
 - [x] `packages/domain` package + tsconfig; `bun install` (zod 4.4.3 resolved)
-- [ ] Add MIT `LICENSE`
-- [ ] Copy this file to `TODO.md`
-- [ ] `git init`, initial commit
+- [x] Add MIT `LICENSE`
+- [x] Copy this file to `TODO.md`
+- [x] `git init`, initial commit
 - [ ] **Confirm with user before creating the public GitHub repo** (outward-facing action), then push
 
 ## Phase 1 — `packages/domain`
@@ -64,12 +64,11 @@ The spine. Zod only, zero I/O.
 - [x] `src/ids.ts` — branded `OrgId` / `InvestigationId` / `EvidenceNodeId`, `newId()`, RFC 9562
       **UUIDv7** (time-ordered for index locality; 12-bit counter keeps same-ms ids monotonic;
       holds steady if the clock steps backwards). 10 tests green.
-- [ ] `src/registry.ts` — **test already written and RED, implement next.**
-      `EvidenceKindDefinition` (`kind`, `version`, `schema`, `examples`, `identity`, `summarize`,
-      `timestamps`, optional `sourceUrl`) + `EvidenceKindRegistry` with
+- [x] `src/registry.ts` — `EvidenceKindDefinition` (`kind`, `version`, `schema`, `examples`,
+      `identity`, `summarize`, `timestamps`, optional `sourceUrl`) + `EvidenceKindRegistry` with
       `registerCore` / `register` / `get` / `require` / `parse` / `isCore` / `list`.
-      Rules: core kinds bare, plugin kinds dotted, `kind@version` uniqueness, kind-name and
-      version format validation, `parse` strips unknown keys (collector output is untrusted).
+      Core kinds bare, plugin kinds dotted, `kind@version` uniqueness, kind-name and version
+      validation, `parse` strips unknown keys (collector output is untrusted). 27 tests green.
 - [ ] Add remaining branded ids as consumed (`CollectorRunId`, `HypothesisId`, `ServiceId`)
 - [ ] `src/kinds/*.ts` — 10 core kinds: `alert`, `deployment`, `pull_request`, `commit`,
       `metric_series`, `log_pattern`, `config_change`, `feature_flag_change`, `service`,
