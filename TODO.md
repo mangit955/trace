@@ -211,9 +211,14 @@ The spine. Zod only, zero I/O.
       etiquette is now fetched per channel and memoised.
 - [x] Root `dev` / `start` scripts, because Bun loads `.env` from the **working directory** while
       module resolution follows the file — running from `apps/` silently dropped every credential.
-- [ ] **Still unverified:** delivery of a message over a real channel. Telegram needs
-      `TELEGRAM_BOT_TOKEN`; Slack's `installSlack()` returns an `authorize_url` needing a browser
-      click. Everything up to the transport is exercised against the live gateway.
+- [x] **Verified over a real Telegram channel** as `@trace_b_bot` (connection `active`):
+      `investigate INC-481`, `why` and a free-form question all answered, with blocks rendering
+      natively as a heading, fields, timeline list and deep-link buttons, and Caspian auto-threading
+      each reply. Reading that conversation is what caught the `/start` and ack defects, and timing
+      it is what caught follow-ups re-reasoning (40s → 1ms).
+- [ ] Slack remains connected-but-unexercised: `installSlack()` returns an `authorize_url` needing
+      a browser click. The handler is channel-agnostic and tested on both, but no Slack message has
+      actually been delivered.
 
 ## Phase 5 — `packages/db`
 
@@ -237,7 +242,8 @@ The spine. Zod only, zero I/O.
 - [ ] README: problem, quickstart, how to talk to it, architecture, the four-criteria write-up,
       honest statement of which mode a reviewer is seeing (recorded vs live), and the note that
       free LLM tiers train on prompts so production must not point one at real telemetry
-- [ ] Deploy the Telegram bot; put the handle in the README
+- [ ] Deploy the Telegram bot (running locally as **@trace_b_bot**, connection active); put the
+      handle in the README
 - [ ] CI: `bun test` + `biome check` + `tsc --noEmit`
 
 ---
@@ -247,8 +253,9 @@ The spine. Zod only, zero I/O.
 - [ ] `bun test` green: serializer determinism (golden files), citation validator rejects
       hallucinated ids, state machine rejects illegal transitions, registry namespacing,
       `assertValidEvidenceKind` across all core kinds
-- [ ] End-to-end with **no database and no credentials**: message the agent `investigate INC-481`,
-      get a cited report; reply `why?` and get reasoning scoped to that thread
+- [x] End-to-end with **no database and no credentials**: `bun run dev` gives a cited report for
+      `investigate INC-481`, and `why` resolves to that thread. Also verified over live Telegram
+      with credentials present.
 - [ ] Same flow against `docker compose up` with Postgres
 - [ ] Multi-channel: same investigation reachable from Telegram and Slack through one handler
 - [ ] Collector failure path: break credentials, investigation still completes and reports the gap
