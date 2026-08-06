@@ -4,6 +4,7 @@ import {
   createInvestigation,
   defaultWindowFor,
   EvidenceKindRegistry,
+  type Investigation,
   missingInformationFrom,
   newId,
   OrgId,
@@ -11,28 +12,38 @@ import {
   systemClock,
 } from '@trace/domain';
 import { fixtureCollectors, INC_481 } from './fixtures/index.ts';
-import { collectEvidence, githubCollectorFromEnv } from './index.ts';
+import {
+  type Collector,
+  collectEvidence,
+  githubCollector,
+  githubCollectorFromEnv,
+  selectCollectors,
+} from './index.ts';
 
 /**
- * The demo path, driven through the public entry point only: seeded sources plus the real GitHub
- * collector with nothing configured. Every other test imports modules directly, so nothing else
- * would notice a barrel that forgot an export.
+ * The two modes Trace ships in, driven through the public entry point only.
+ *
+ * Every other test imports modules directly, so nothing else would notice a barrel that forgot an
+ * export — and nothing else exercises the seeded/live switch a reviewer's first run depends on.
  */
-describe('a credential-free collection through the public API', () => {
-  async function run() {
-    const registry = new EvidenceKindRegistry();
-    registerCoreKinds(registry);
-
-    const investigation = createInvestigation({
+describe('composing an investigation', () => {
+  function investigation(): Investigation {
+    return createInvestigation({
       orgId: newId(OrgId),
       externalRef: INC_481.externalRef,
       window: defaultWindowFor(INC_481.alertAt),
       now: INC_481.alertAt,
     });
+  }
+
+  async function run(collectors: readonly Collector[]) {
+    const registry = new EvidenceKindRegistry();
+    registerCoreKinds(registry);
+    const target = investigation();
 
     const result = await collectEvidence({
-      collectors: [...fixtureCollectors(INC_481), githubCollectorFromEnv({})],
-      investigation,
+      collectors,
+      investigation: target,
       registry,
       clock: systemClock,
     });
@@ -40,20 +51,52 @@ describe('a credential-free collection through the public API', () => {
     return {
       ...result,
       graph: buildEvidenceGraph({
-        investigationId: investigation.id,
+        investigationId: target.id,
         nodes: result.nodes,
         edges: result.edges,
       }),
     };
   }
 
-  test('still produces a usable evidence graph', async () => {
-    expect((await run()).graph.nodes.length).toBeGreaterThan(10);
+  const seeded = () => fixtureCollectors(INC_481);
+
+  describe('with no credentials, as a reviewer first runs it', () => {
+    const collectors = () =>
+      selectCollectors({ seeded: seeded(), live: [githubCollectorFromEnv({})] });
+
+    test('produces a usable evidence graph', async () => {
+      expect((await run(collectors())).graph.nodes.length).toBeGreaterThan(10);
+    });
+
+    test('reports no gaps, because the seeded source covers the unconfigured connector', async () => {
+      // Reporting "github was not consulted" beside the GitHub evidence the seed provided would
+      // make the gap list wrong, and the gap list is the part of a report meant to be trusted
+      // unconditionally.
+      expect(missingInformationFrom((await run(collectors())).runs)).toEqual([]);
+    });
   });
 
-  test('reports the unconfigured connector as a known gap, in an operator-actionable form', async () => {
-    expect(missingInformationFrom((await run()).runs)).toEqual([
-      'github was not consulted: GITHUB_TOKEN is not set',
-    ]);
+  describe('with a GitHub token configured', () => {
+    const live = () =>
+      githubCollector({
+        token: 'ghp_test',
+        repos: ['acme/payments-api'],
+        fetch: (async () => new Response('[]', { status: 200 })) as unknown as typeof fetch,
+      });
+
+    test('the live collector replaces the seeded source of the same name', async () => {
+      const { runs, nodes } = await run(selectCollectors({ seeded: seeded(), live: [live()] }));
+
+      expect(runs.filter((entry) => entry.collector === 'github')).toHaveLength(1);
+      expect(nodes.some((node) => node.connector === 'github')).toBe(false);
+    });
+
+    test('an empty repository is reported as a gap rather than passed off as no change', async () => {
+      const gaps = missingInformationFrom(
+        (await run(selectCollectors({ seeded: seeded(), live: [live()] }))).runs,
+      );
+
+      expect(gaps).toEqual(['github returned no evidence for this window']);
+    });
   });
 });

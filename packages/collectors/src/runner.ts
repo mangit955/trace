@@ -53,6 +53,7 @@ interface CollectorOutcome {
 }
 
 export async function collectEvidence(input: CollectEvidenceInput): Promise<CollectionResult> {
+  assertDistinctNames(input.collectors);
   const timeoutMs = input.timeoutMs ?? DEFAULT_COLLECTOR_TIMEOUT_MS;
 
   const startedAt = input.clock.now();
@@ -80,6 +81,28 @@ export async function collectEvidence(input: CollectEvidenceInput): Promise<Coll
     edges: resolveEdges(input.investigation, byKey, relations),
     runs: ordered.map((outcome) => outcome.run),
   };
+}
+
+/**
+ * Rejects two collectors sharing a name.
+ *
+ * Collector names key the gap report, so two sources under one name make it self-contradictory —
+ * one run says GitHub was never consulted while the other's GitHub evidence sits in the graph.
+ * Unlike a collector failure, this is a wiring bug: deterministic, present on every run, and worth
+ * surfacing at the call site rather than smuggling into a report an on-call engineer trusts. See
+ * `selectCollectors` for the intended way to combine seeded and live sources.
+ */
+function assertDistinctNames(collectors: readonly Collector[]): void {
+  const seen = new Set<string>();
+  for (const collector of collectors) {
+    if (seen.has(collector.name)) {
+      throw new Error(
+        `Cannot run two collectors named "${collector.name}"; collector names key the ` +
+          'missing-information report and must be unique.',
+      );
+    }
+    seen.add(collector.name);
+  }
 }
 
 async function runOne(
@@ -178,12 +201,20 @@ function resolveEdges(
   relations: readonly RelationDraft[],
 ): readonly EvidenceEdge[] {
   const edges: EvidenceEdge[] = [];
+  const seen = new Set<string>();
 
   for (const relation of relations) {
     const from = byKey.get(relation.from)?.id;
     const to = byKey.get(relation.to)?.id;
     // `from === to` means a collector emitted a self-relation, which carries no information.
     if (from === undefined || to === undefined || from === to) continue;
+
+    // Two collectors stating the same relation is corroboration, not a second fact. Rendered
+    // twice it reads to the model as two independent observations, so the edge is deduplicated
+    // exactly as the nodes it joins are.
+    const identity = `${from}|${relation.relation}|${to}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
 
     edges.push(
       createEvidenceEdge({

@@ -197,6 +197,24 @@ describe('collectEvidence', () => {
     expect(result.edges).toEqual([]);
   });
 
+  test('refuses two collectors claiming the same name', async () => {
+    // Two sources under one name make the gap report self-contradictory: one run says github was
+    // never consulted while the other's GitHub evidence sits in the graph. That is a wiring bug,
+    // it is deterministic, and it should surface on the first run rather than in a report.
+    expect(collect([stubCollector('github', []), stubCollector('github', [])])).rejects.toThrow(
+      /two collectors named "github"/,
+    );
+  });
+
+  test('states a relation once when two collectors both report it', async () => {
+    // Corroboration is not new information. Rendered twice, the same fact reads to the model as
+    // two independent observations, and the relation block stops matching the evidence above it.
+    const result = await collect([relatingCollector('github'), relatingCollector('datadog')]);
+
+    expect(result.nodes).toHaveLength(2);
+    expect(result.edges).toHaveLength(1);
+  });
+
   test('produces a graph that builds without dangling edges when a collector fails', async () => {
     const exploding: Collector = {
       name: 'datadog',

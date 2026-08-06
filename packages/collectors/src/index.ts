@@ -20,6 +20,7 @@ export {
   keyOf,
   type RelationDraft,
 } from './collector.ts';
+export { type SelectCollectorsInput, selectCollectors } from './compose.ts';
 export {
   type GitHubCollectorOptions,
   type GitHubEnv,

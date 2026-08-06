@@ -295,14 +295,24 @@ async function collectCommits(
     per_page: String(PER_PAGE),
   });
 
-  const payloads = commits.map((commit) => ({
-    repo,
-    sha: commit.sha,
-    message: subjectLineOf(commit.commit.message),
-    author: commit.author?.login ?? commit.commit.author?.name ?? 'unknown',
-    committedAt: isoOf(commit.commit.author?.date ?? ''),
-    ...(commit.html_url === undefined ? {} : { url: commit.html_url }),
-  }));
+  const payloads: CommitPayload[] = [];
+
+  for (const commit of commits) {
+    // Imported and rewritten history yields commits with no author block at all. Such a commit
+    // cannot be placed on a timeline, and one of them must not cost the investigation every
+    // deployment and pull request this collector had already found.
+    const committedAt = isoOrUndefined(commit.commit.author?.date);
+    if (committedAt === undefined) continue;
+
+    payloads.push({
+      repo,
+      sha: commit.sha,
+      message: subjectLineOf(commit.commit.message),
+      author: commit.author?.login ?? commit.commit.author?.name ?? 'unknown',
+      committedAt,
+      ...(commit.html_url === undefined ? {} : { url: commit.html_url }),
+    });
+  }
 
   return { evidence: payloads.map((payload) => draft(commitKind, payload)), payloads };
 }
@@ -323,8 +333,21 @@ function serviceNameOf(repo: string): string {
   return repo.split('/').at(-1) ?? repo;
 }
 
+/**
+ * Normalises a timestamp GitHub has already been shown to parse.
+ *
+ * Only safe downstream of {@link within}, which rejects an unparseable date by comparing NaN.
+ * Anywhere else, use {@link isoOrUndefined} — `new Date('').toISOString()` throws, and a throw
+ * here costs the whole repository's evidence.
+ */
 function isoOf(timestamp: string): string {
   return new Date(timestamp).toISOString();
+}
+
+function isoOrUndefined(timestamp: string | undefined): string | undefined {
+  if (timestamp === undefined) return undefined;
+  const at = new Date(timestamp);
+  return Number.isNaN(at.getTime()) ? undefined : at.toISOString();
 }
 
 function within(timestamp: string, window: TimeWindow): boolean {

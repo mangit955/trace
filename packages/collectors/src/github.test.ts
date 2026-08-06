@@ -219,6 +219,16 @@ describe('the GitHub collector', () => {
     ]);
   });
 
+  test('drops a commit with no usable date instead of losing the whole repository', async () => {
+    // Imported and rewritten history turns up commits with a null author. One of them must not
+    // cost the investigation every deploy and PR the collector had already found.
+    const { result } = await collectFrom({
+      commits: [commitJson, { sha: 'b'.repeat(40), commit: { message: 'orphan', author: null } }],
+    });
+
+    expect(payloadsOf(result.evidence, 'commit')).toHaveLength(1);
+  });
+
   test('asks GitHub for commits within the investigation window', async () => {
     const { calls } = await collectFrom({ commits: [commitJson] });
     const commitCall = calls.find((call) => call.url.includes('/commits'));
