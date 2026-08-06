@@ -102,6 +102,29 @@ describe('fallbackReasoner', () => {
   });
 });
 
+describe('fallbackReasoner and free-form answers', () => {
+  test('keeps the primary’s ability to answer questions', async () => {
+    // Wrapping must not quietly drop a capability: the recorded fallback cannot improvise, so if
+    // the wrapper hid answer() the agent would fall back to help text even with a key configured.
+    const answering: Reasoner = { ...working, answer: async () => 'Because of the pool [E1].' };
+
+    const subject = fallbackReasoner(answering, recorded);
+
+    expect(
+      await subject.answer?.({
+        prompt: 'why?',
+        investigation: requestFor('INC-481').investigation,
+      }),
+    ).toBe('Because of the pool [E1].');
+  });
+
+  test('cannot answer when the primary cannot, rather than inventing a way', async () => {
+    const subject = fallbackReasoner(working, recorded);
+
+    expect(subject.answer).toBeUndefined();
+  });
+});
+
 describe('selectReasoner', () => {
   test('replays recordings when no key is configured', () => {
     expect(selectReasoner({}, { recorded }).name).toBe('recorded');

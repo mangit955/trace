@@ -204,4 +204,26 @@ describe('the Gemini reasoner', () => {
   test('refuses to run without an API key', () => {
     expect(() => geminiReasoner({ apiKey: undefined })).toThrow(/GEMINI_API_KEY/);
   });
+
+  test('answers a free-form question as plain prose', async () => {
+    const prose = new Response(
+      JSON.stringify({
+        candidates: [
+          {
+            content: { parts: [{ text: 'The pool was never raised [E4].' }] },
+            finishReason: 'STOP',
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+    const { subject, calls } = reasoner([() => prose]);
+
+    const answer = await subject.answer?.({ prompt: 'Was it raised?', investigation });
+
+    expect(answer).toBe('The pool was never raised [E4].');
+    // No response schema: this path wants prose, and forcing JSON onto it would make the model
+    // wrap a chat reply in an object for no reason.
+    expect(calls[0]?.body['generationConfig']).toBeUndefined();
+  });
 });

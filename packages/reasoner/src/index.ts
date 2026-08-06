@@ -12,12 +12,14 @@
  * still works.
  */
 
+export { type AnswerQuestionInput, answerQuestion, NoAnswererError } from './answer.ts';
 export {
   type GeminiReasonerOptions,
   geminiReasoner,
 } from './gemini.ts';
 export { type BuildPromptInput, buildPrompt, PROMPT_VERSION } from './prompt.ts';
 export {
+  type AnswerRequest,
   MalformedReasoningError,
   ReasonedOutput,
   type Reasoner,

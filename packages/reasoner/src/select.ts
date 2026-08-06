@@ -31,7 +31,7 @@ export function fallbackReasoner(primary: Reasoner, backup: Reasoner): Reasoner 
   // live reasoning.
   let answered = primary;
 
-  return {
+  const wrapped: Reasoner = {
     name: primary.name,
     get model(): string {
       return answered.model;
@@ -49,6 +49,15 @@ export function fallbackReasoner(primary: Reasoner, backup: Reasoner): Reasoner 
       }
     },
   };
+
+  // Free-form answers have no fallback: a recording replays one incident's report and cannot
+  // improvise, so there is nothing to fall back *to*. The capability is forwarded when the primary
+  // has it and left absent when it does not, and the agent degrades to deterministic help rather
+  // than a wrapper that silently answers with something else.
+  const answerWith = primary.answer?.bind(primary);
+  if (answerWith) wrapped.answer = answerWith;
+
+  return wrapped;
 }
 
 export interface SelectReasonerInput {

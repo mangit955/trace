@@ -93,6 +93,43 @@ export function geminiReasoner(options: GeminiReasonerOptions): Reasoner {
 
       return parseCandidate(await response.json());
     },
+
+    /**
+     * Answers a follow-up in prose.
+     *
+     * No `responseSchema` here: this path wants a chat reply, and forcing JSON onto it would make
+     * the model wrap a sentence in an object for nothing. The safety property is not lost — the
+     * caller runs `assertGrounded` over the prose before it reaches anyone.
+     */
+    async answer(request): Promise<string> {
+      const response = await withRetries(
+        () =>
+          call(`${baseUrl}/v1beta/models/${model}:generateContent`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-goog-api-key': apiKey,
+            },
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: [{ text: request.prompt }] }],
+            }),
+          }),
+        { maxAttempts, sleep },
+      );
+
+      const payload = (await response.json()) as GenerateContentResponse;
+      const candidate = payload.candidates?.[0];
+      const text = candidate?.content?.parts?.[0]?.text;
+
+      if (text === undefined || text.trim().length === 0) {
+        throw new MalformedReasoningError(
+          'gemini',
+          `no answer text (finishReason ${candidate?.finishReason ?? 'absent'})`,
+        );
+      }
+
+      return text.trim();
+    },
   };
 }
 

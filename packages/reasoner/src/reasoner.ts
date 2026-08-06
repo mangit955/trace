@@ -49,12 +49,26 @@ export interface ReasoningRequest {
   gaps: readonly string[];
 }
 
+export interface AnswerRequest {
+  /** Fully built by `answer.ts`, including the evidence and the citation rule. */
+  prompt: string;
+  investigation: Investigation;
+}
+
 export interface Reasoner {
   /** Identifies the implementation: `gemini`, `recorded`. */
   readonly name: string;
   /** The model identifier recorded on every hypothesis for reproducibility. */
   readonly model: string;
   reason(request: ReasoningRequest): Promise<ReasonedOutput>;
+  /**
+   * Answers a free-form follow-up question.
+   *
+   * Optional on purpose. A recorded reasoner replays captured reports and cannot improvise, so it
+   * simply does not implement this — and the agent degrades to deterministic help text rather than
+   * pretending. Making it required would force every implementation to fake an answer.
+   */
+  answer?(request: AnswerRequest): Promise<string>;
 }
 
 /** Raised when a reasoner returns something that is not a valid response. */

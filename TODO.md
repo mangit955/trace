@@ -175,25 +175,42 @@ The spine. Zod only, zero I/O.
 
 ## Phase 4 — `apps/agent` (the graded surface)
 
-- [ ] Caspian `CommClient` bootstrap; `connectTelegram()` + `installSlack()`
-- [ ] **Single `onMessage` handler** for both channels
-- [ ] Intent parsing: `investigate <id>`, `why`, `show <thing>`, `help`, fallback
-- [ ] Conversation store: `message.conversationId → Investigation`, so a bare "why?" resolves
-- [ ] Channel-aware renderer: Slack typed `Block[]` cards with buttons deep-linking to the real
-      deploy/PR; Telegram markdown. Renderer is the *only* channel-aware code.
-- [ ] `message.typing()` during collection
-- [ ] Fold `client.behaviorPrompt()` into the system prompt for per-channel etiquette
-- [ ] Proactive `initiate()` on inbound alert webhook — allowlist only
-      (`TRACE_ONCALL_RECIPIENTS`), once per incident, follow-ups in-thread
-- [ ] Typed error handling: `AccountRequiredError` / `InsufficientCreditError` produce actionable
-      startup logs; `CommError` retried or surfaced; a throwing handler replies with an apology and
-      **the listen loop survives** — one bad message must never take the agent down
-- [ ] Tests against a **fake Caspian client**: full conversation flows, no network
-- [ ] Test: empty allowlist ⇒ zero `initiate()` calls
+- [x] `src/caspian.ts` — `CommClient` bootstrap, `connectTelegram()` + `installSlack()`, `onMessage`
+      **and** `onInteraction` (a button tap carries the text a user could have typed, so a tap and a
+      message take the identical path), `listen({ ack })`.
+- [x] **Single handler** — `handleMessage(deps, inbound)`, a pure function that never branches on
+      channel. Telegram, Slack and the terminal REPL all call it; a test drives one script through
+      two channels and asserts identical output.
+- [x] `src/intent.ts` — `investigate <id>` / `why` / `show <thing>` / `help` / free-form question,
+      tolerant of how people actually type at 3am, and of `text` being **null** (a photo or voice
+      note must not crash the handler).
+- [x] `src/render.ts` — one renderer, not one per platform. Caspian's `Block[]` is
+      provider-neutral, so every reply carries plain text *and* blocks and the channel decides.
+      Buttons deep-link to the real deploy/PR/commit/incident; a `Why?` callback button routes back
+      through `onInteraction`.
+- [x] `src/alerts.ts` — `initiate()` to the `TRACE_ONCALL_RECIPIENTS` allowlist only, once per
+      incident, and **nothing at all** when the allowlist is unset.
+- [x] Typed errors: `AccountRequiredError` → "run `caspian login`"; `InsufficientCreditError` →
+      the balance; `CommError` → status and detail. A failed channel degrades the agent, never
+      kills it.
+- [x] `packages/db` — in-memory repositories (Phase 5's first bullet, pulled forward so the agent
+      wires against the real ports), with tenant isolation tested per repository.
+- [x] `packages/reasoner/src/answer.ts` — grounded free-form answers via an **optional**
+      `Reasoner.answer`, gated by `assertGrounded`; degrades to help text with no key.
+- [x] `bun run dev` — terminal REPL over the same handler, zero credentials.
+- [x] Tests against the **real** `CommClient` with an injected `fetch`, not a hand-rolled fake: a
+      fake would encode my own beliefs about the SDK, so a wrong belief would make fake and code
+      wrong together. This caught two wire-shape errors (below).
+- [x] Test: empty allowlist ⇒ zero `initiate()` calls.
+- [ ] **Unverified:** no `CASPIAN_API_KEY` in this environment, so live delivery over Telegram/Slack
+      has never been exercised. Everything is tested to the transport boundary. `installSlack()`
+      also returns an `authorize_url` needing a browser click, so Telegram is the realistically
+      verifiable channel. Closes in one run once a key exists.
 
 ## Phase 5 — `packages/db`
 
-- [ ] In-memory repository implementations (back the demo and the entire test suite)
+- [x] In-memory repository implementations (back the demo and the entire test suite) — **done in
+      Phase 4**, because the agent needed real ports rather than a throwaway map
 - [ ] Postgres migrations: `orgs`, `investigations` (unique `org_id + external_ref`),
       `evidence_nodes` (unique `investigation_id + content_hash`; index
       `(investigation_id, occurred_at)`; GIN on payload), `evidence_edges`, `collector_runs`,

@@ -10,12 +10,30 @@
         "typescript": "^5.9.3",
       },
     },
+    "apps/agent": {
+      "name": "@trace/agent",
+      "version": "0.1.0",
+      "dependencies": {
+        "@trace/collectors": "workspace:*",
+        "@trace/db": "workspace:*",
+        "@trace/domain": "workspace:*",
+        "@trace/reasoner": "workspace:*",
+        "caspian-sdk": "^0.6.1",
+      },
+    },
     "packages/collectors": {
       "name": "@trace/collectors",
       "version": "0.1.0",
       "dependencies": {
         "@trace/domain": "workspace:*",
         "zod": "^4.1.13",
+      },
+    },
+    "packages/db": {
+      "name": "@trace/db",
+      "version": "0.1.0",
+      "dependencies": {
+        "@trace/domain": "workspace:*",
       },
     },
     "packages/domain": {
@@ -56,7 +74,11 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.7", "", { "os": "win32", "cpu": "x64" }, "sha512-V+0wu/nrj2S+MhP4EQ0uHNolP0IALEsz45pg0WoKkHfDeh0+ItHwP/p7bX5RPoMOl9NkpHYWdYPhIcy2mACHvQ=="],
 
+    "@trace/agent": ["@trace/agent@workspace:apps/agent"],
+
     "@trace/collectors": ["@trace/collectors@workspace:packages/collectors"],
+
+    "@trace/db": ["@trace/db@workspace:packages/db"],
 
     "@trace/domain": ["@trace/domain@workspace:packages/domain"],
 
@@ -67,6 +89,8 @@
     "@types/node": ["@types/node@26.1.2", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-Vu4a5UFA9rIIFJ7rB/Vaafh9lrCQszopTCx6KjFboXTGQbPNasehVR5TEiithSDGyd1DEiUByggTZsg8jukeIg=="],
 
     "bun-types": ["bun-types@1.3.14", "", { "dependencies": { "@types/node": "*" } }, "sha512-4N0ig0fEomHt5R0KCFWjovxow98rIoRwKolrYdCcknNwMekCXRnWEUvgu5soYV8QXtVsrUD8B95MBOZGPvr6KQ=="],
+
+    "caspian-sdk": ["caspian-sdk@0.6.1", "", {}, "sha512-1IampbvMu4OprtxKdasqyHck9Dj1+p4ASqnurpCZDKoqrmG0H8e2wG/vzJ9FtskIH3ytVr+Tz9JiLJhB78/v6g=="],
 
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
