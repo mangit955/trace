@@ -1,0 +1,90 @@
+{
+  "externalId": "INC-481",
+  "model": "gemini-2.5-flash",
+  "promptVersion": "investigate/v1",
+  "capturedAt": "2026-08-06T06:41:35.844Z",
+  "response": {
+    "summary": "An elevated 5xx rate was observed on payments-api [E1, E9], along with a decreased checkout success rate on checkout-web [E2, E10], starting around 10:16. Payments-api logs show widespread 'redis: connection pool exhausted' errors [E11] and significantly increased Redis command timeout rates [E8], leading to 503 errors being returned to checkout-web [E12]. These issues followed a deployment of payments-api v2.4.1 [E6] at 10:12, which included a configuration change reducing REDIS_POOL_MAX from 50 to 5 [E4].",
+    "hypotheses": [
+      {
+        "statement": "The incident was caused by the payments-api Redis connection pool being exhausted due to the REDIS_POOL_MAX configuration being lowered from 50 to 5.",
+        "confidence": 0.95,
+        "citations": [
+          {
+            "label": "E4",
+            "stance": "supports"
+          },
+          {
+            "label": "E6",
+            "stance": "supports"
+          },
+          {
+            "label": "E13",
+            "stance": "supports"
+          },
+          {
+            "label": "E14",
+            "stance": "supports"
+          },
+          {
+            "label": "E11",
+            "stance": "supports"
+          },
+          {
+            "label": "E8",
+            "stance": "supports"
+          },
+          {
+            "label": "E9",
+            "stance": "supports"
+          },
+          {
+            "label": "E12",
+            "stance": "supports"
+          },
+          {
+            "label": "E7",
+            "stance": "supports"
+          }
+        ]
+      },
+      {
+        "statement": "The change to REDIS_AUTH_TOKEN on payments-api contributed to the connection issues.",
+        "confidence": 0.2,
+        "citations": [
+          {
+            "label": "E5",
+            "stance": "supports"
+          },
+          {
+            "label": "E11",
+            "stance": "contradicts"
+          }
+        ]
+      },
+      {
+        "statement": "The new-cart-ui feature flag change on checkout-web caused the incident.",
+        "confidence": 0.1,
+        "citations": [
+          {
+            "label": "E3",
+            "stance": "supports"
+          },
+          {
+            "label": "E11",
+            "stance": "contradicts"
+          },
+          {
+            "label": "E16",
+            "stance": "contradicts"
+          }
+        ]
+      }
+    ],
+    "suggestedQuestions": [
+      "What is the current REDIS_POOL_MAX value configured for payments-api?",
+      "Are there any redis-primary metrics, such as current connection counts or client list, that can show saturation or rejected connections around 10:12?",
+      "Given the prior similar incident [E7], was the 'pool saturation alert' mentioned in the fix applied, and is it currently firing?"
+    ]
+  }
+}

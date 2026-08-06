@@ -1,0 +1,19 @@
+{
+  "name": "@trace/reasoner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@trace/domain": "workspace:*",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@trace/collectors": "workspace:*"
+  }
+}

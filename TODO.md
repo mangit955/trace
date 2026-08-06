@@ -146,16 +146,32 @@ The spine. Zod only, zero I/O.
 
 ## Phase 3 — `packages/reasoner`
 
-- [ ] `Reasoner` interface; `InvestigationReport` type (summary, hypotheses + confidence,
-      citations, timeline, missing info, suggested questions)
-- [ ] `RecordedReasoner` — replays a captured Gemini response per seeded incident so the demo needs
-      **no API key**; also makes tests hermetic
-- [ ] `GeminiReasoner` — Gemini 2.5 Flash, JSON-schema structured output, active when
-      `GEMINI_API_KEY` is set
-- [ ] **Citation validation gate** — reject any output citing an unknown evidence id
-- [ ] Rate limits are normal on a free tier: bounded exponential backoff on `429`, then fall back
-      to the recorded response rather than failing the investigation
-- [ ] Tests: hallucinated citation rejected; `429` still yields a completed investigation
+- [x] `src/reasoner.ts` — `Reasoner` port and `ReasonedOutput` as a **zod schema**, so model output
+      is parsed rather than cast: a truncated response or a confidence of `95` becomes a typed
+      failure the fallback can act on, and a volunteered `missingInformation` key is stripped.
+- [x] `src/report.ts` — `InvestigationReport` + `reasonAboutInvestigation`, the entry point Phase 4
+      calls. **The model writes only claims**: summary, hypotheses, questions. The timeline is read
+      off the graph and the gaps come from `missingInformationFrom(runs)`, because a model cannot
+      introspect what it was never shown. Non-event kinds (`service`, `past_incident`) stay citable
+      but out of the timeline — found by rendering it, where a March incident headed an August
+      sequence.
+- [x] **Citation gate** — every hypothesis is built by `createHypothesis`, which cannot resolve a
+      label that was not shown. No new validation logic; the domain already made it unrepresentable.
+- [x] `src/gemini.ts` — `generateContent` + `responseSchema`, key in a header rather than the
+      documented `?key=` query param (a key in a URL reaches proxy logs). Backoff on 429/500/503
+      keyed off **HTTP status**, since the docs no longer document a `retryDelay`.
+- [x] `src/recorded.ts` + `recordings/inc-481.json` — a **genuine** captured Gemini response, taken
+      by `bun run capture:reasoning`, which refuses to write unless every citation resolves.
+- [x] `src/select.ts` — `selectReasoner` / `fallbackReasoner`, mirroring `selectCollectors`. No key
+      ⇒ replay; key ⇒ live with the recording behind it. A 429 storm still yields a report; an
+      incident with no recording raises rather than replaying another incident's reasoning.
+- [x] Tests: 57 green — hallucinated citation rejected, `429` still completes, prompt deterministic,
+      drift guards proven to bite by breaking them.
+- [x] Verified live against the real API twice (capture + composed Phase 4 wiring): header auth and
+      the hand-written schema are both accepted, and the model reached 0.95–0.98 on the true cause
+      while ranking the seeded decoy at 0.10 with `contradicts` citations against it.
+- [ ] Note for Phase 6: Bun loads `.env` from the **working directory**, so `bun run dev` must be
+      run from the repo root or the agent will silently replay recordings instead of reasoning live.
 
 ## Phase 4 — `apps/agent` (the graded surface)
 

@@ -17,6 +17,9 @@
 
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
+    // Recorded reasoning is committed as raw captured JSON so a re-capture diffs cleanly. The
+    // import is typed loosely, so the recording is still parsed through its zod schema at load.
+    "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "noEmit": true
