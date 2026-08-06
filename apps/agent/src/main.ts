@@ -9,7 +9,7 @@ import {
   connectChannels,
   outboundConnection,
 } from './caspian.ts';
-import { buildDeps } from './wiring.ts';
+import { buildDeps, openStore } from './wiring.ts';
 
 /**
  * Trace on Caspian — `bun start`.
@@ -29,7 +29,9 @@ if (!env['CASPIAN_API_KEY']) {
   process.exit(1);
 }
 
-const deps = buildDeps(env);
+// Migrations run inside this call when DATABASE_URL is set, so there is no second command to
+// forget between `docker compose up` and a working agent.
+const deps = buildDeps(env, await openStore(env));
 const client = new CommClient({ apiKey: env['CASPIAN_API_KEY'] });
 
 // Caspian knows each channel's etiquette — that Slack renders mrkdwn rather than markdown, that X
@@ -112,6 +114,9 @@ if (alertPort > 0) {
   );
 }
 
+console.log(
+  `[trace] storage: ${env['DATABASE_URL'] ? 'postgres' : 'in-memory (nothing persists)'}`,
+);
 console.log(`[trace] reasoning: ${deps.reasoner.model}`);
 console.log('[trace] listening.');
 

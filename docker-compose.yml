@@ -1,0 +1,30 @@
+# The Postgres path. Entirely optional — `bun run dev` needs none of this.
+#
+#   docker compose up -d
+#   DATABASE_URL=postgres://trace:trace@localhost:5433/trace bun start
+#
+# Port 5433, not 5432, so this does not fight a Postgres already running on the host.
+services:
+  postgres:
+    # pgvector rather than plain postgres: `0002_vector.sql` needs the `vector` extension for
+    # "has this happened before?", and installing it into the stock image at runtime is not
+    # something a reviewer should have to do.
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: trace
+      POSTGRES_PASSWORD: trace
+      POSTGRES_DB: trace
+    ports:
+      - '5433:5432'
+    volumes:
+      - trace-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Migrations run at startup, so the agent must not connect before the server is accepting
+      # connections — otherwise the first `bun start` after a `compose up` fails on a race.
+      test: ['CMD-SHELL', 'pg_isready -U trace -d trace']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  trace-pgdata:

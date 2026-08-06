@@ -91,8 +91,12 @@ export {
   type CollectorRunRepository,
   type ConversationLinkRepository,
   type EvidenceRepository,
+  type FindSimilarInput,
   type HypothesisRepository,
+  type IndexInvestigationInput,
   type InvestigationRepository,
+  type InvestigationSimilarityRepository,
+  type SimilarInvestigation,
   systemClock,
   type TenantContext,
 } from './ports.ts';

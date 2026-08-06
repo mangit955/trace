@@ -47,7 +47,26 @@ function abridge<T>(entries: readonly T[]): { shown: T[]; omitted: number; break
   };
 }
 
-export function renderReport(report: InvestigationReport, incidentId: string): Reply {
+/**
+ * A prior investigation this one resembles.
+ *
+ * Passed alongside the report rather than added to `InvestigationReport`, deliberately. A report is
+ * the model's output plus computed facts, and every claim in it cites evidence; precedent is
+ * neither — it is a nearest-neighbour lookup in storage. Putting it inside the report type would
+ * blur the line between "what the reasoner concluded" and "what the database happens to hold, with
+ * no citation behind it".
+ */
+export interface Precedent {
+  incidentId: string;
+  /** Cosine similarity in [0, 1]. Shown, not hidden: an 0.62 match deserves to look like one. */
+  score: number;
+}
+
+export function renderReport(
+  report: InvestigationReport,
+  incidentId: string,
+  precedents: readonly Precedent[] = [],
+): Reply {
   const leading = report.hypotheses[0];
 
   const lines = [`${incidentId} — what I found`, '', report.summary, ''];
@@ -77,15 +96,30 @@ export function renderReport(report: InvestigationReport, incidentId: string): R
     lines.push('No blind spots: every source reported.');
   }
 
+  // Stated as resemblance, never as cause. "We have seen this shape before" is a retrieval result,
+  // and phrasing it as a finding would smuggle an uncited claim into a report where everything else
+  // is either cited or computed.
+  if (precedents.length > 0) {
+    lines.push('');
+    lines.push('Similar past investigations:');
+    for (const precedent of precedents) {
+      lines.push(`  - ${precedent.incidentId} (${percent(precedent.score)} similar)`);
+    }
+  }
+
   lines.push('');
   // Names the model verbatim, which for the credential-free demo reads "(replayed)". A report
   // that let a recording pass for live reasoning would misrepresent itself to a reviewer.
   lines.push(`Reasoned by ${report.model}`);
 
-  return { text: lines.join('\n'), blocks: reportBlocks(report, incidentId) };
+  return { text: lines.join('\n'), blocks: reportBlocks(report, incidentId, precedents) };
 }
 
-function reportBlocks(report: InvestigationReport, incidentId: string): Block[] {
+function reportBlocks(
+  report: InvestigationReport,
+  incidentId: string,
+  precedents: readonly Precedent[],
+): Block[] {
   const leading = report.hypotheses[0];
 
   const blocks: Block[] = [
@@ -120,6 +154,16 @@ function reportBlocks(report: InvestigationReport, incidentId: string): Block[] 
       fields: report.missingInformation.map((gap, index) => ({
         label: index === 0 ? 'Not seen' : ' ',
         value: gap,
+      })),
+    });
+  }
+
+  if (precedents.length > 0) {
+    blocks.push({
+      type: 'fields',
+      fields: precedents.map((precedent, index) => ({
+        label: index === 0 ? 'Seen before' : ' ',
+        value: `${precedent.incidentId} (${percent(precedent.score)} similar)`,
       })),
     });
   }

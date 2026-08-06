@@ -1,6 +1,6 @@
 import type { CollectEvidenceInput, CollectionResult, Collector } from '@trace/collectors';
 import type { SeededIncident } from '@trace/collectors/fixtures';
-import type { InMemoryStore } from '@trace/db';
+import type { TraceStore } from '@trace/db';
 import type {
   Clock,
   EvidenceKindRegistry,
@@ -8,7 +8,12 @@ import type {
   Investigation,
   TenantContext,
 } from '@trace/domain';
-import { answerQuestion, type InvestigationReport, type Reasoner } from '@trace/reasoner';
+import {
+  answerQuestion,
+  type Embedder,
+  type InvestigationReport,
+  type Reasoner,
+} from '@trace/reasoner';
 import { parseIntent } from './intent.ts';
 import { reportForInvestigation, runInvestigation } from './investigate.ts';
 import type { InboundMessage, Reply } from './message.ts';
@@ -28,7 +33,8 @@ import { renderHelp, renderReasoning, renderReport } from './render.ts';
  */
 
 export interface AgentDeps {
-  store: InMemoryStore;
+  /** In-memory for the credential-free demo, Postgres when `DATABASE_URL` is set. Same contract. */
+  store: TraceStore;
   registry: EvidenceKindRegistry;
   reasoner: Reasoner;
   /** Which collectors to run for an incident. Seeded fixtures by default; real ones when configured. */
@@ -37,6 +43,13 @@ export interface AgentDeps {
   seededIncidents: readonly SeededIncident[];
   tenant: TenantContext;
   clock: Clock;
+  /**
+   * Turns an investigation into a vector for "has this happened before?".
+   *
+   * Optional, so a deployment that does not want the feature simply omits it and every other path
+   * is unchanged — and so tests that care about reasoning do not have to think about embeddings.
+   */
+  embedder?: Embedder;
   /** Defaults to the real parallel runner; a seam for tests that need collection itself to fail. */
   collect?: (input: CollectEvidenceInput) => Promise<CollectionResult>;
   /**
@@ -116,7 +129,7 @@ async function investigate(
 
   // Reuse of an already-reconstructed incident is handled inside runInvestigation, so the chat
   // handler and the alert webhook cannot drift apart on it.
-  const { investigation, report } = await runInvestigation(
+  const { investigation, report, precedents } = await runInvestigation(
     deps,
     seeded.externalRef,
     seeded.alertAt,
@@ -126,7 +139,7 @@ async function investigate(
   // meaning three messages later.
   await deps.store.conversations.link(deps.tenant, message.conversationId, investigation.id);
 
-  return renderReport(report, seeded.externalRef.id);
+  return renderReport(report, seeded.externalRef.id, precedents);
 }
 
 /**
