@@ -1,7 +1,14 @@
 import { CommClient } from 'caspian-sdk';
 import { type AlertIngress, receiveAlert } from './alert-ingress.ts';
 import { recipientsFrom } from './alerts.ts';
-import { ACK, attachHandlers, channelGuideSupplier, connectChannels } from './caspian.ts';
+import {
+  ACK,
+  attachHandlers,
+  awaitActive,
+  channelGuideSupplier,
+  connectChannels,
+  outboundConnection,
+} from './caspian.ts';
 import { buildDeps } from './wiring.ts';
 
 /**
@@ -34,6 +41,9 @@ deps.behaviourGuideFor = channelGuideSupplier(client);
 const connections = await connectChannels(client, {
   telegramBotToken: env['TELEGRAM_BOT_TOKEN'],
   slack: env['TRACE_ENABLE_SLACK'] === 'true',
+  slackConnectionId: env['SLACK_CONNECTION_ID'],
+  slackDisplayName: env['TRACE_SLACK_DISPLAY_NAME'] ?? 'Trace',
+  slackIconUrl: env['TRACE_SLACK_ICON_URL'],
 });
 
 if (connections.length === 0) {
@@ -44,7 +54,20 @@ if (connections.length === 0) {
 }
 
 for (const connection of connections) {
-  console.log(`[trace] ${connection.channel ?? 'channel'} connected (${connection.status})`);
+  const channel = connection.channel ?? 'channel';
+
+  if (connection.status === 'active') {
+    console.log(`[trace] ${channel} connected (active)`);
+    continue;
+  }
+
+  // Not "connected". An OAuth channel nobody has approved yet delivers nothing, and saying
+  // otherwise sends the operator looking for a bug in the handler.
+  console.log(`[trace] ${channel} awaiting approval (${connection.status})`);
+
+  // Deliberately not awaited: a human who never clicks must not hold up the channels that are
+  // already live, and `listen()` below is what those channels need.
+  void awaitActive(client, connection);
 }
 
 attachHandlers(client, deps);
@@ -55,12 +78,14 @@ const alertPort = Number(env['TRACE_ALERT_PORT'] ?? 0);
 const recipients = recipientsFrom(env['TRACE_ONCALL_RECIPIENTS']);
 
 if (alertPort > 0) {
-  const first = connections[0];
+  // The connection that can actually deliver, not simply the first one connected — paging on a
+  // Slack install nobody has approved would succeed at the API and reach no one.
+  const outbound = outboundConnection(connections);
   const ingress: AlertIngress = {
     agent: deps,
     recipients,
     alreadyNotified: new Set<string>(),
-    ...(first ? { outbound: { client, connectionId: first.id } } : {}),
+    ...(outbound ? { outbound: { client, connectionId: outbound.id } } : {}),
   };
 
   Bun.serve({
