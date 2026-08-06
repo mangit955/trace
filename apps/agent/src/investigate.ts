@@ -27,17 +27,23 @@ export interface InvestigationOutcome {
 }
 
 /**
- * Rebuilds the report for an investigation from stored evidence.
+ * The report for an investigation — the one the engineer was actually shown.
  *
- * Regenerated rather than cached, which is safe precisely because evidence is immutable and
- * serialization is deterministic: `E4` means the same node now as it did when the report was first
- * written, so a follow-up's citations line up with the original.
+ * Read back rather than regenerated. Reasoning is neither free nor deterministic: re-running it to
+ * answer "why?" took 40 seconds on a real Telegram thread and could return different hypotheses,
+ * which would mean explaining a conclusion nobody was ever shown.
+ *
+ * Re-reasoning only happens when there is no stored report, which means an investigation that
+ * predates the store or one whose reasoning failed the first time.
  */
 export async function reportForInvestigation(
   deps: AgentDeps,
   investigation: Investigation,
 ): Promise<InvestigationReport> {
-  return await reasonAboutInvestigation({
+  const stored = await deps.store.reports.findFor(deps.tenant, investigation.id);
+  if (stored) return stored;
+
+  const report = await reasonAboutInvestigation({
     investigation,
     graph: await deps.store.evidence.loadGraph(deps.tenant, investigation.id),
     registry: deps.registry,
@@ -45,6 +51,9 @@ export async function reportForInvestigation(
     reasoner: deps.reasoner,
     now: deps.clock.now(),
   });
+
+  await deps.store.reports.save(deps.tenant, report);
+  return report;
 }
 
 export async function runInvestigation(
@@ -106,6 +115,8 @@ export async function runInvestigation(
   for (const hypothesis of report.hypotheses) {
     await deps.store.hypotheses.save(deps.tenant, hypothesis);
   }
+  // Stored whole, so every follow-up in the thread explains this report rather than a new one.
+  await deps.store.reports.save(deps.tenant, report);
 
   const ready = transition(reasoning, 'ready', deps.clock.now());
   await deps.store.investigations.save(deps.tenant, ready);

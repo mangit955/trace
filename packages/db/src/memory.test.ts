@@ -238,3 +238,32 @@ describe('conversation links', () => {
     expect(await store.conversations.resolve(globex, 'telegram:4821')).toBeUndefined();
   });
 });
+
+describe('reports', () => {
+  const report = (investigationId: ReturnType<typeof investigationFor>['id']) => ({
+    investigationId,
+    orgId: acme.orgId,
+    summary: 'A deploy [E6] preceded the spike [E1].',
+    hypotheses: [],
+    timeline: [],
+    missingInformation: [],
+    suggestedQuestions: [],
+    model: 'gemini-2.5-flash',
+    promptVersion: 'investigate/v1',
+    generatedAt: AT,
+  });
+
+  test('returns the report an engineer was shown', async () => {
+    const investigation = investigationFor(acme);
+    await store.reports.save(acme, report(investigation.id));
+
+    expect((await store.reports.findFor(acme, investigation.id))?.summary).toContain('[E6]');
+  });
+
+  test('never returns another tenant’s report', async () => {
+    const investigation = investigationFor(acme);
+    await store.reports.save(acme, report(investigation.id));
+
+    expect(await store.reports.findFor(globex, investigation.id)).toBeUndefined();
+  });
+});

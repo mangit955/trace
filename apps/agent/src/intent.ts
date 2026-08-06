@@ -26,9 +26,17 @@ export type Intent =
 const INCIDENT_ID = /\b([a-z]{2,10}-\d{1,8})\b/i;
 
 const WHY = /\b(why|how come|what caused|root cause)\b/i;
-const HELP = /^\/?(help|\?|what can you do)\b/i;
+const HELP = /^(help|\?|what can you do)\b/i;
+/**
+ * Slash commands, which every Telegram bot receives whether it asks for them or not.
+ *
+ * `/start` is the very first thing a new user sends, so it has to mean something deliberate. Only
+ * matched with the leading slash: "start looking into INC-481" is a request to investigate.
+ */
+const SLASH_HELP = /^\/(start|help)\b/i;
 const SHOW = /\b(?:show|display|give me)\b\s+(?:me\s+)?(?:the\s+)?(.+)/i;
-const INVESTIGATE = /\b(investigate|look into|dig into|what happened (?:with|to|on))\b/i;
+const INVESTIGATE =
+  /\b(investigate|look into|looking into|dig into|what happened (?:with|to|on))\b/i;
 
 export function parseIntent(text: string | null | undefined): Intent {
   const trimmed = (text ?? '').trim();
@@ -37,7 +45,7 @@ export function parseIntent(text: string | null | undefined): Intent {
   // than an error and is what a person would do.
   if (trimmed.length === 0) return { kind: 'help' };
 
-  if (HELP.test(trimmed)) return { kind: 'help' };
+  if (SLASH_HELP.test(trimmed) || HELP.test(trimmed)) return { kind: 'help' };
 
   // Checked before the incident id, because "why did INC-481 happen?" is a follow-up about an
   // investigation already in the thread, not a request to start a second one.

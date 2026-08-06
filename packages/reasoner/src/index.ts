@@ -40,3 +40,4 @@ export {
   type SelectReasonerInput,
   selectReasoner,
 } from './select.ts';
+export type { ReportRepository } from './store.ts';

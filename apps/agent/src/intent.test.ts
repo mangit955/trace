@@ -34,6 +34,21 @@ describe('parseIntent', () => {
     expect(parseIntent('show me the logs')).toEqual({ kind: 'show', subject: 'logs' });
   });
 
+  test('treats /start as the introduction it is', () => {
+    // Telegram sends /start on first contact with every bot, so this is the first thing a new
+    // user ever sends. It reached help only by accident before — as an unrecognised question with
+    // no investigation to answer from — which meant that once a thread had an investigation, the
+    // same /start would have been forwarded to the model as a question about the incident.
+    expect(parseIntent('/start').kind).toBe('help');
+  });
+
+  test('does not mistake a sentence beginning with "start" for a command', () => {
+    expect(parseIntent('start looking into INC-481')).toEqual({
+      kind: 'investigate',
+      incidentId: 'INC-481',
+    });
+  });
+
   test('recognises a request for help', () => {
     for (const text of ['help', 'HELP', '/help', 'what can you do?']) {
       expect(parseIntent(text).kind).toBe('help');

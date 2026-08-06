@@ -17,8 +17,16 @@ import type { InboundMessage } from './message.ts';
  * which is the whole point of Caspian, and the reason there is no per-platform handler here.
  */
 
-/** What the agent says the instant a message lands, on channels with no typing indicator. */
-const ACK = 'On it — reconstructing the incident…';
+/**
+ * What the agent says the instant a message lands, before the handler has run.
+ *
+ * Caspian sends this on *every* inbound message, so it has to be true of every one. It said
+ * "reconstructing the incident…" until a real `/start` on Telegram was answered with it — nothing
+ * was being reconstructed, and the bot's first words to its first user were a small lie. It stays
+ * because a reconstruction takes several seconds and silence reads as a broken bot, but it now
+ * promises only what it can keep.
+ */
+const ACK = 'On it, one moment…';
 
 export function attachHandlers(client: CommClient, deps: AgentDeps): void {
   client.onMessage(async (message) => {

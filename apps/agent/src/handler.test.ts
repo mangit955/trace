@@ -239,3 +239,68 @@ describe('one handler across channels', () => {
     expect(viaSlack.blocks).toEqual(viaTelegram.blocks);
   });
 });
+
+describe('follow-ups reuse the report that was shown', () => {
+  test('"why" explains the same conclusion, without asking the model again', async () => {
+    // Re-reasoning per follow-up took 40 seconds on a real Telegram thread and, worse, is not
+    // deterministic: the model can return different hypotheses, so "why" would explain a
+    // conclusion the user was never shown.
+    let reasonCalls = 0;
+    const counting = deps({
+      reasoner: {
+        name: 'counting',
+        model: 'counting-1',
+        reason: async (request) => {
+          reasonCalls++;
+          return {
+            summary: `run ${reasonCalls} [E1]`,
+            hypotheses: [
+              {
+                statement: `conclusion from run ${reasonCalls}`,
+                confidence: 0.9,
+                citations: [{ label: 'E1', stance: 'supports' as const }],
+              },
+            ],
+            suggestedQuestions: [],
+          };
+        },
+      },
+    });
+
+    const report = await handleMessage(counting, inbound('investigate INC-481', 'c:1'));
+    const why = await handleMessage(counting, inbound('why', 'c:1'));
+
+    expect(reasonCalls).toBe(1);
+    expect(report.text).toContain('conclusion from run 1');
+    expect(why.text).toContain('conclusion from run 1');
+  });
+
+  test('"show" reads the stored report rather than reasoning again', async () => {
+    let reasonCalls = 0;
+    const counting = deps({
+      reasoner: {
+        name: 'counting',
+        model: 'counting-1',
+        reason: async () => {
+          reasonCalls++;
+          return {
+            summary: 'x [E1]',
+            hypotheses: [
+              {
+                statement: 'y',
+                confidence: 0.9,
+                citations: [{ label: 'E1', stance: 'supports' as const }],
+              },
+            ],
+            suggestedQuestions: [],
+          };
+        },
+      },
+    });
+
+    await handleMessage(counting, inbound('investigate INC-481', 'c:1'));
+    await handleMessage(counting, inbound('show deploy', 'c:1'));
+
+    expect(reasonCalls).toBe(1);
+  });
+});

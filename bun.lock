@@ -35,6 +35,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@trace/domain": "workspace:*",
+        "@trace/reasoner": "workspace:*",
       },
     },
     "packages/domain": {
