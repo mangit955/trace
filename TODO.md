@@ -69,7 +69,7 @@ The spine. Zod only, zero I/O.
       `registerCore` / `register` / `get` / `require` / `parse` / `isCore` / `list`.
       Core kinds bare, plugin kinds dotted, `kind@version` uniqueness, kind-name and version
       validation, `parse` strips unknown keys (collector output is untrusted). 27 tests green.
-- [ ] Add remaining branded ids as consumed (`CollectorRunId`, `HypothesisId`, `ServiceId`)
+- [x] Branded ids added as consumed (`CollectorRunId`, `HypothesisId`)
 - [x] `src/testing/conformance.ts` — exported `assertValidEvidenceKind(def)` suite plugin authors
       can run; every core kind exercised through it. Checks naming, examples, schema strength
       (rejects `z.any()`), identity/summarize determinism, bounded summaries, valid dates, URLs.
@@ -79,22 +79,29 @@ The spine. Zod only, zero I/O.
       `signal.ts` (alert, metric_series, log_pattern), `context.ts` (service, past_incident).
       `metric_series` caps at `MAX_METRIC_POINTS`; `log_pattern` has no raw-lines field at all.
       `config_change` carries a `redacted` flag so credential values never reach prompt text.
-- [ ] `src/entities/investigation.ts` — `Investigation` + status state machine
-      (`pending → collecting → reasoning → ready | failed`), illegal transitions rejected
-- [ ] `src/entities/evidence.ts` — `EvidenceNode` (provenance: connector, collector run,
-      `source_url`; three timestamps: `occurred_at` / `observed_at` / `collected_at`),
-      `EvidenceEdge` (relation enum), content hashing
-- [ ] `src/entities/hypothesis.ts` — `Hypothesis` + citations with `supports | contradicts` stance
-- [ ] `src/graph.ts` — `EvidenceGraph` construction + invariants (no dangling edges, no
-      cross-investigation edges)
-- [ ] `src/serialize.ts` — `serializeForReasoning(graph, budget)` → `{ text, idMap }`.
-      Deterministic ordering (`occurred_at`, `kind`, `id`) so the same graph is byte-identical
-      every time; stable short ids `E1..En`; budget prioritization
-      (alert > in-window changes > metric deltas > log patterns > past incidents);
-      elided nodes reported *as* elided
-- [ ] `src/citations.ts` — validator rejecting references to nonexistent node ids
-- [ ] `src/ports.ts` — repository interfaces, every method taking an explicit `TenantContext`
-- [ ] `src/index.ts` — public exports
+- [x] `src/entities/investigation.ts` — `Investigation` + state machine; transitions encoded as
+      data so the machine is inspectable. `ready`/`failed` terminal: re-investigating creates a
+      new Investigation, since evidence is immutable and citations must keep resolving.
+      `defaultWindowFor` is asymmetric (60m back, 15m forward) — causes precede alerts.
+- [x] `src/entities/evidence.ts` — `EvidenceNode` (provenance + three timestamps),
+      `EvidenceEdge`. Dedupe on `kind@version:identity` rather than a content hash: identity is
+      already the logical key, so no hash and no collision risk. Timestamps and `sourceUrl` are
+      derived from the kind, never accepted from the caller.
+- [x] `src/entities/hypothesis.ts` — citations with `supports | contradicts`; requires ≥1
+      *supporting* citation, and records model/promptVersion/evidenceSeen for reproducibility.
+- [x] `src/entities/collector-run.ts` — `missingInformationFrom()`. `skipped` is distinct from
+      `failed`; a clean run returning zero evidence is also reported as a gap.
+- [x] `src/graph.ts` — construction + invariants (no dangling edges, no cross-investigation
+      nodes/edges), dedupe, and total ordering that makes prompt text byte-identical.
+- [x] `src/serialize.ts` — `serializeForReasoning(graph, registry, budget)` → `{ text, idMap,
+      elided }`. Sections double as drop priority; the alert is never elided; omissions are
+      stated in the text.
+- [x] `src/citations.ts` — `validateCitations` / `extractCitationLabels` / `assertGrounded`.
+      Brackets required in prose to avoid false positives; reports every bad label at once.
+- [x] `src/ports.ts` — repository interfaces + `Clock`, every method taking explicit
+      `TenantContext` (no ambient tenant — a misplaced orgId is a breach, not a bug).
+- [x] `src/index.ts` + `src/testing/index.ts` — public exports, with a smoke test that drives a
+      whole investigation through the barrel only.
 
 ## Phase 2 — `packages/collectors`
 

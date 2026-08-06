@@ -21,6 +21,9 @@ export type EvidenceNodeId = z.infer<typeof EvidenceNodeId>;
 export const CollectorRunId = z.uuid().brand<'CollectorRunId'>();
 export type CollectorRunId = z.infer<typeof CollectorRunId>;
 
+export const HypothesisId = z.uuid().brand<'HypothesisId'>();
+export type HypothesisId = z.infer<typeof HypothesisId>;
+
 /** Mints a new id of the given branded type. */
 export function newId<T extends z.ZodType<string, string>>(schema: T): z.infer<T> {
   return schema.parse(uuidv7());
