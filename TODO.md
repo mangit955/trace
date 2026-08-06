@@ -105,13 +105,32 @@ The spine. Zod only, zero I/O.
 
 ## Phase 2 — `packages/collectors`
 
-- [ ] `Collector` interface + `CollectorRun` result (status, error, nodes, edges)
-- [ ] Parallel runner: collectors run concurrently, **one failure never fails the investigation**;
-      failures recorded as gaps
-- [ ] Seeded fixture source — a realistic multi-service incident (deploy → Redis pool exhaustion →
-      error spike, with a matching past incident) that makes the demo genuinely interesting
-- [ ] Real GitHub collector (deployments, PRs, commits), active only when `GITHUB_TOKEN` is set
-- [ ] Tests: partial failure produces a usable graph plus a recorded gap
+- [x] `src/collector.ts` — `Collector` (`name`, optional `unavailableReason()`, `collect()`) plus
+      `EvidenceDraft` / `RelationDraft`. Collectors propose drafts; the runner validates them and
+      stamps provenance, so no collector can set `occurredAt` and reorder the timeline. Relations
+      address evidence by **evidence key** (`kind@version:identity`), not node id, so a collector
+      can relate its findings to another collector's without either knowing the other ran.
+      `draft()` / `keyOf()` type-check an in-tree collector's payload against its kind.
+- [x] `src/runner.ts` — `collectEvidence`. Collectors run under `Promise.all` with a per-collector
+      timeout; throwing, hanging, unconfigured and schema-violating collectors each become a
+      recorded gap rather than a failed investigation. Assembly is re-sorted by collector name, so
+      which duplicate wins and what order evidence lands in never depend on who answered first.
+      Unresolvable relations are dropped — that is what stops one failed collector dangling an edge
+      and taking `buildEvidenceGraph` down with it.
+- [x] `src/fixtures/incident-481.ts` — the seeded incident, across 7 sources: pool config change →
+      deploy → Redis pool exhaustion → 5xx spike on payments-api → checkout-web failing behind it,
+      with INC-302 as precedent. Carries a decoy (an unrelated flag change) and a redacted
+      credential rotation, so the demo exercises discrimination and redaction rather than just
+      happy-path rendering. Absolute timestamps, because the recorded reasoning must match the
+      evidence it was captured against.
+- [x] `src/github.ts` — real GitHub collector (deployments + statuses, merged PRs with diff size,
+      commits in-window), `githubCollectorFromEnv` always returns it so "no token" is a stated gap
+      rather than silence. Non-terminal deployments are dropped rather than guessed; commit bodies
+      are cut to the subject line before anything reaches a third-party model.
+- [x] Tests: 36 green — partial failure yields a usable graph plus a recorded gap, wedged collector
+      is abandoned, credential-free run reports `github was not consulted: GITHUB_TOKEN is not set`.
+- [x] Found by rendering the seeded graph (not by tests): the serializer sorted relations as
+      strings, listing `E11` before `E2`. Fixed in `packages/domain/src/serialize.ts` with a test.
 
 ## Phase 3 — `packages/reasoner`
 

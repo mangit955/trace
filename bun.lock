@@ -10,6 +10,14 @@
         "typescript": "^5.9.3",
       },
     },
+    "packages/collectors": {
+      "name": "@trace/collectors",
+      "version": "0.1.0",
+      "dependencies": {
+        "@trace/domain": "workspace:*",
+        "zod": "^4.1.13",
+      },
+    },
     "packages/domain": {
       "name": "@trace/domain",
       "version": "0.1.0",
@@ -36,6 +44,8 @@
     "@biomejs/cli-win32-arm64": ["@biomejs/cli-win32-arm64@2.5.7", "", { "os": "win32", "cpu": "arm64" }, "sha512-Oq4x0CCwP4jirrcTywXs5kOGZ4v5vuEP+gWrbtjApOA2CL9F3F9GlIdQIci8AKSCa/zURanMRpX/4wQ7Am6hHg=="],
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.7", "", { "os": "win32", "cpu": "x64" }, "sha512-V+0wu/nrj2S+MhP4EQ0uHNolP0IALEsz45pg0WoKkHfDeh0+ItHwP/p7bX5RPoMOl9NkpHYWdYPhIcy2mACHvQ=="],
+
+    "@trace/collectors": ["@trace/collectors@workspace:packages/collectors"],
 
     "@trace/domain": ["@trace/domain@workspace:packages/domain"],
 
