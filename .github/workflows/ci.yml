@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # All three commands, not just the tests. Bun's test runner strips types rather than checking
+  # them, so a type error passes `bun test` in silence — `tsc` is the only thing that sees it.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - run: bun install --frozen-lockfile
+      - run: bun test
+      - run: bun run typecheck
+      - run: bun run lint
+
+  # The job worth having. The repository contract suite is written once and run twice, and in
+  # Phase 5 it went 13 red against real Postgres while staying green in memory: Bun's SQL client
+  # decodes scalars but not vectors, uuid[] or jsonb, and no in-memory test can reach that.
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # pgvector, not stock postgres: migration 0002 needs the `vector` extension for
+        # "has this happened before?", and a stock image fails it loudly.
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: trace
+          POSTGRES_PASSWORD: trace
+          POSTGRES_DB: trace
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U trace -d trace"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - run: bun install --frozen-lockfile
+      # Migrations run inside `PostgresStore.connect`, so there is no separate migrate step here
+      # for the same reason there is none between `docker compose up` and `bun start`.
+      - run: bun test
+        env:
+          TRACE_TEST_DATABASE_URL: postgres://trace:trace@localhost:5432/trace

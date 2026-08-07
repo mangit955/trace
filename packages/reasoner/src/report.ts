@@ -119,6 +119,67 @@ export async function reasonAboutInvestigation(
   };
 }
 
+export interface UnreasonedReportInput {
+  investigation: Investigation;
+  graph: EvidenceGraph;
+  registry: EvidenceKindRegistry;
+  runs: readonly CollectorRun[];
+  /** The model that was *meant* to reason, named so the degradation is attributable. */
+  reasonerModel: string;
+  /** Why there is no reasoning, in the words of the error that caused it. */
+  reason: string;
+  now: Date;
+  serialize?: SerializeOptions;
+}
+
+/**
+ * The report you can still write when reasoning fails.
+ *
+ * "A partial investigation is a success" has always been about collectors, but the same argument
+ * holds one step later: the timeline and the blind spots are *computed* from evidence and collector
+ * runs, so they are exactly as trustworthy whether or not a model ever ran. Discarding them because
+ * the interpretation failed throws away the reconstruction — which is the product — and hands an
+ * on-call engineer an error at 3am instead.
+ *
+ * Found by running it: with a broken `GITHUB_TOKEN` the evidence set shrinks, the recorded response
+ * cites a node that is no longer there, and the citation gate rightly rejects the whole response.
+ * Rightly — the fix is not to loosen the gate, it is to still report what was never the model's to
+ * write.
+ *
+ * There are deliberately **no** hypotheses. Not one uncited sentence about cause survives this
+ * path; the summary describes the failure and nothing else.
+ */
+export function unreasonedReport(input: UnreasonedReportInput): InvestigationReport {
+  const { investigation, graph, registry, runs, now } = input;
+
+  const evidence = serializeForReasoning(graph, registry, input.serialize ?? {});
+
+  // Error messages routinely end in a full stop and are routinely interpolated mid-sentence. Left
+  // alone this renders "… E14.. The timeline", which reads as a typo in the one report a user is
+  // least inclined to trust.
+  const reason = input.reason.replace(/\.\s*$/, '');
+
+  return {
+    investigationId: investigation.id,
+    orgId: investigation.orgId,
+    summary:
+      `I reconstructed what happened, but could not reason about it: ${reason}. ` +
+      'The timeline and the blind spots below are computed from the evidence itself, ' +
+      'so they stand — there is simply no interpretation of them here.',
+    hypotheses: [],
+    timeline: timelineFrom(graph, registry, evidence.idMap),
+    missingInformation: missingInformationFrom(runs),
+    suggestedQuestions: [],
+    // Never passes for a reasoned report. A reader comparing two of these has to be able to see
+    // which one had a model behind it. An em dash rather than brackets because the model name
+    // already carries its own — `gemini-2.5-flash (replayed) (reasoning unavailable)` reads as a
+    // bug in the renderer.
+    model: `${input.reasonerModel} — reasoning unavailable`,
+    promptVersion: PROMPT_VERSION,
+    generatedAt: now,
+  };
+}
+
 /**
  * Evidence that describes state rather than something that happened.
  *

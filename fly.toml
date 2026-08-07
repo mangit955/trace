@@ -1,0 +1,44 @@
+# Trace on Fly.io.
+#
+#   fly launch --no-deploy --copy-config    # reuses this file; do not let it generate one
+#   fly secrets set CASPIAN_API_KEY=… TELEGRAM_BOT_TOKEN=… GEMINI_API_KEY=…
+#   fly deploy
+#
+# `app` is set by `fly launch`.
+
+primary_region = 'iad'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  # In-memory unless a DATABASE_URL secret is set. Nothing persists across a deploy in that mode,
+  # which is fine for a demo bot and stated in the README rather than hidden.
+  TRACE_ENABLE_SLACK = 'false'
+
+# Deliberately NO [http_service] block.
+#
+# Caspian's `listen()` is an outbound long poll — Trace opens the connection to the gateway, the
+# gateway never dials in — so the bot needs no inbound port at all. Adding one would attach Fly's
+# auto-stop-on-idle proxy to a service that receives no HTTP traffic by design, and the machine
+# would be stopped within minutes of every deploy. The bot would go silent, and it would look
+# exactly like a handler bug.
+#
+# If you enable TRACE_ALERT_PORT (the alert webhook, the one genuine inbound surface), add:
+#
+#   [http_service]
+#     internal_port = 8787
+#     force_https = true
+#     auto_stop_machines = false
+#     min_machines_running = 1
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '512mb'
+
+# One machine, always on. With no service attached there is no autoscaler and nothing to stop it,
+# so this is the only knob that matters:
+#
+#   fly scale count 1
+#
+# Check it with `fly status` after a deploy — a machine in `stopped` is a silent bot.

@@ -139,7 +139,39 @@ describe('help and unrecognised messages', () => {
       inbound('was the pool ever raised back?', 'telegram:1'),
     );
 
-    expect(reply.text).toMatch(/investigate|GEMINI_API_KEY/);
+    expect(reply.text).toMatch(/investigate/);
+  });
+
+  test('says free-form answers need a key, rather than silently showing help', async () => {
+    // Found by running the credential-free REPL: asking a question returned bare help text, so a
+    // reviewer could not tell a missing key from a broken bot. `NoAnswererError` already carried
+    // exactly the right sentence and the handler was discarding it.
+    await handleMessage(shared, inbound('investigate INC-481', 'telegram:1'));
+
+    const reply = await handleMessage(shared, inbound('who deployed it?', 'telegram:1'));
+
+    expect(reply.text).toContain('GEMINI_API_KEY');
+  });
+
+  test('stays quiet about why when an answer fails its citation check', async () => {
+    // The other branch of the same catch, and it must NOT gain an explanation: an ungrounded answer
+    // is a safety failure, not a configuration gap, and naming a credential would suggest that
+    // setting one makes the ungrounded answer appear.
+    const ungrounded = deps({
+      reasoner: {
+        name: 'ungrounded',
+        model: 'ungrounded-1',
+        reason: defaultRecordedReasoner().reason.bind(defaultRecordedReasoner()),
+        // E999 was never collected, so `assertGrounded` rejects this on the way out.
+        answer: async () => 'It was the flag [E999].',
+      },
+    });
+    await handleMessage(ungrounded, inbound('investigate INC-481', 'telegram:1'));
+
+    const reply = await handleMessage(ungrounded, inbound('who deployed it?', 'telegram:1'));
+
+    expect(reply.text).not.toContain('GEMINI_API_KEY');
+    expect(reply.text).toContain('investigate');
   });
 });
 
@@ -214,6 +246,50 @@ describe('surviving failure', () => {
     expect(reply.text).toMatch(/sorry|went wrong/i);
   });
 
+  test('still reports the reconstruction when the reasoner fails', async () => {
+    // "A partial investigation is a success" applies one step later than it was written for. The
+    // timeline and the blind spots are computed from evidence, not written by the model, so a
+    // failed reasoner must not take them down with it. Hit for real by pointing a broken
+    // GITHUB_TOKEN at the credential-free path: the evidence set shrank, the recorded response
+    // cited a node that was gone, and the whole investigation came back as an apology.
+    const failing = deps({
+      reasoner: {
+        name: 'failing',
+        model: 'failing-1',
+        reason: async () => {
+          throw new Error('the recorded response cites evidence that was not collected');
+        },
+      },
+    });
+
+    const reply = await handleMessage(failing, inbound('investigate INC-481', 'c:1'));
+
+    expect(reply.text).not.toMatch(/sorry|went wrong/i);
+    // The reconstruction survives: the deploy is still there, in order.
+    expect(reply.text).toContain('Timeline:');
+    expect(reply.text).toContain('v2.4.1');
+    // And it says why there is no conclusion, rather than inventing one.
+    expect(reply.text).toContain('could not reason about it');
+    expect(reply.text).not.toContain('Most likely');
+  });
+
+  test('a follow-up after a failed reasoner explains the degradation, not a fabrication', async () => {
+    const failing = deps({
+      reasoner: {
+        name: 'failing',
+        model: 'failing-1',
+        reason: async () => {
+          throw new Error('nope');
+        },
+      },
+    });
+    await handleMessage(failing, inbound('investigate INC-481', 'c:1'));
+
+    const why = await handleMessage(failing, inbound('why', 'c:1'));
+
+    expect(why.text).not.toMatch(/sorry|went wrong/i);
+  });
+
   test('never rethrows, whatever happens', async () => {
     const broken = deps({
       collectorsFor: () => {
@@ -250,7 +326,7 @@ describe('follow-ups reuse the report that was shown', () => {
       reasoner: {
         name: 'counting',
         model: 'counting-1',
-        reason: async (request) => {
+        reason: async () => {
           reasonCalls++;
           return {
             summary: `run ${reasonCalls} [E1]`,

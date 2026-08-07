@@ -1,0 +1,11 @@
+# `COPY . .` would otherwise ship the host's node_modules over the ones just installed for the
+# image's platform, and — far worse — bake .env into a layer.
+node_modules
+**/node_modules
+.env
+.env.local
+.git
+.github
+dist
+*.log
+.DS_Store

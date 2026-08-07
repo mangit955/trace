@@ -12,6 +12,7 @@ import {
   answerQuestion,
   type Embedder,
   type InvestigationReport,
+  NoAnswererError,
   type Reasoner,
 } from '@trace/reasoner';
 import { parseIntent } from './intent.ts';
@@ -219,9 +220,15 @@ async function answer(deps: AgentDeps, message: InboundMessage, question: string
       ...(behaviourGuide === undefined ? {} : { behaviourGuide }),
     });
     return { text };
-  } catch {
-    // Covers both "this reasoner cannot answer" and "the answer failed its citation check". In
-    // either case the honest move is to show what Trace can actually do.
+  } catch (error) {
+    // Two very different failures used to collapse into the same bare help text, and on the
+    // credential-free path — the one a reviewer runs first — that made a missing key look like a
+    // broken bot. `NoAnswererError` already says exactly what to set, so say it.
+    if (error instanceof NoAnswererError) return renderHelp(error.message);
+
+    // The other branch: the answer came back citing evidence that was never collected, and
+    // `assertGrounded` rejected it. Showing what Trace can do is the honest move, with no note —
+    // see `renderHelp`.
     return renderHelp();
   }
 }

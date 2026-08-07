@@ -1,8 +1,10 @@
 import { collectEvidence } from '@trace/collectors';
 import {
   buildEvidenceGraph,
+  type CollectorRun,
   createInvestigation,
   defaultWindowFor,
+  type EvidenceGraph,
   type ExternalRef,
   type Investigation,
   transition,
@@ -11,6 +13,7 @@ import {
   type InvestigationReport,
   reasonAboutInvestigation,
   similaritySourceText,
+  unreasonedReport,
 } from '@trace/reasoner';
 import type { AgentDeps } from './handler.ts';
 import type { Precedent } from './render.ts';
@@ -36,6 +39,10 @@ export interface InvestigationOutcome {
 /** How many prior incidents to show. Three is a hint; ten is a second report to read. */
 const MAX_PRECEDENTS = 3;
 
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * The report for an investigation — the one the engineer was actually shown.
  *
@@ -53,17 +60,60 @@ export async function reportForInvestigation(
   const stored = await deps.store.reports.findFor(deps.tenant, investigation.id);
   if (stored) return stored;
 
-  const report = await reasonAboutInvestigation({
+  const report = await reasonOrDegrade(
+    deps,
     investigation,
-    graph: await deps.store.evidence.loadGraph(deps.tenant, investigation.id),
-    registry: deps.registry,
-    runs: await deps.store.collectorRuns.listFor(deps.tenant, investigation.id),
-    reasoner: deps.reasoner,
-    now: deps.clock.now(),
-  });
+    await deps.store.evidence.loadGraph(deps.tenant, investigation.id),
+    await deps.store.collectorRuns.listFor(deps.tenant, investigation.id),
+  );
 
   await deps.store.reports.save(deps.tenant, report);
   return report;
+}
+
+/**
+ * Reasons about the evidence, or reports the reconstruction without an interpretation of it.
+ *
+ * The invariant is "a partial investigation is a success", and it turns out to apply one step later
+ * than it was written for. The timeline and the blind spots are *computed* — projected off the
+ * graph and off collector runs — so they are exactly as sound whether or not the model answered.
+ * Letting a reasoner failure propagate discarded them and handed the user "Sorry, something went
+ * wrong", which is the outcome that invariant exists to prevent.
+ *
+ * Hit for real, not imagined: with a broken `GITHUB_TOKEN` the live collector displaces its seeded
+ * stand-in and then fails, the evidence set shrinks, and the recorded response cites a node that is
+ * no longer in it. The citation gate rejects the whole response, correctly — the answer is not to
+ * loosen the gate but to keep reporting the part the model never wrote.
+ */
+async function reasonOrDegrade(
+  deps: AgentDeps,
+  investigation: Investigation,
+  graph: EvidenceGraph,
+  runs: readonly CollectorRun[],
+): Promise<InvestigationReport> {
+  try {
+    return await reasonAboutInvestigation({
+      investigation,
+      graph,
+      registry: deps.registry,
+      runs,
+      reasoner: deps.reasoner,
+      now: deps.clock.now(),
+    });
+  } catch (error) {
+    const reason = messageOf(error);
+    console.error(`[trace] reasoning failed for ${investigation.externalRef.id}: ${reason}`);
+
+    return unreasonedReport({
+      investigation,
+      graph,
+      registry: deps.registry,
+      runs,
+      reasonerModel: deps.reasoner.model,
+      reason,
+      now: deps.clock.now(),
+    });
+  }
 }
 
 export async function runInvestigation(
@@ -114,18 +164,13 @@ export async function runInvestigation(
   const reasoning = transition(collecting, 'reasoning', deps.clock.now());
   await deps.store.investigations.save(deps.tenant, reasoning);
 
-  const report = await reasonAboutInvestigation({
-    investigation: reasoning,
-    graph: buildEvidenceGraph({
-      investigationId: reasoning.id,
-      nodes: collected.nodes,
-      edges: collected.edges,
-    }),
-    registry: deps.registry,
-    runs: collected.runs,
-    reasoner: deps.reasoner,
-    now: deps.clock.now(),
+  const graph = buildEvidenceGraph({
+    investigationId: reasoning.id,
+    nodes: collected.nodes,
+    edges: collected.edges,
   });
+
+  const report = await reasonOrDegrade(deps, reasoning, graph, collected.runs);
 
   for (const hypothesis of report.hypotheses) {
     await deps.store.hypotheses.save(deps.tenant, hypothesis);
@@ -170,7 +215,10 @@ async function indexForSimilarity(
       model: deps.embedder.model,
     });
   } catch (error) {
-    console.error('[trace] could not index for similarity:', error);
+    // The message, not the object. This path is designed to fail quietly — a rate-limited embedder
+    // is a normal Tuesday on a free tier — and dumping a stack trace through Bun's internals for a
+    // convenience feature makes a working system look like it is crashing.
+    console.error(`[trace] could not index for similarity: ${messageOf(error)}`);
   }
 }
 
@@ -206,7 +254,7 @@ async function findPrecedents(
       .filter((match) => match.score >= (deps.embedder?.minSimilarity ?? 1))
       .map((match) => ({ incidentId: match.externalRef.id, score: match.score }));
   } catch (error) {
-    console.error('[trace] could not look up similar investigations:', error);
+    console.error(`[trace] could not look up similar investigations: ${messageOf(error)}`);
     return [];
   }
 }

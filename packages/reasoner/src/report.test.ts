@@ -18,7 +18,7 @@ import {
   UngroundedClaimError,
 } from '@trace/domain';
 import type { Reasoner } from './reasoner.ts';
-import { reasonAboutInvestigation } from './report.ts';
+import { reasonAboutInvestigation, unreasonedReport } from './report.ts';
 
 const ALERT_AT = new Date('2026-08-06T10:16:00.000Z');
 
@@ -283,5 +283,48 @@ describe('reasonAboutInvestigation', () => {
     });
 
     expect(seen).toEqual(['datadog failed: request timed out']);
+  });
+});
+
+describe('unreasonedReport', () => {
+  // The reconstruction is the product; the hypotheses are the interpretation of it. Found by
+  // running the collector-failure path: a broken GITHUB_TOKEN shrank the evidence set, the recorded
+  // response cited a node that no longer existed, the citation gate correctly rejected it — and the
+  // whole investigation came back as "Sorry, something went wrong", throwing away a perfectly good
+  // timeline and an accurate list of blind spots.
+  function degraded() {
+    return unreasonedReport({
+      investigation: target,
+      graph: graphOf(),
+      registry,
+      runs,
+      reasonerModel: 'stub-1',
+      reason: 'the recorded response cites evidence that was not collected',
+      now: ALERT_AT,
+    });
+  }
+
+  test('still reports the timeline, which was never the model’s to write', async () => {
+    expect(degraded().timeline.map((entry) => entry.label)).toEqual(['E2', 'E1']);
+  });
+
+  test('still reports the computed blind spots', async () => {
+    expect(degraded().missingInformation).toEqual(['datadog failed: request timed out']);
+  });
+
+  test('offers no hypotheses at all rather than an uncited guess', async () => {
+    expect(degraded().hypotheses).toEqual([]);
+  });
+
+  test('says in the summary why there is no reasoning', async () => {
+    const summary = degraded().summary;
+
+    expect(summary).toContain('could not');
+    expect(summary).toContain('the recorded response cites evidence that was not collected');
+  });
+
+  test('does not let the degraded report pass for a reasoned one', async () => {
+    // A reader comparing two reports must be able to tell which one had a model behind it.
+    expect(degraded().model).toContain('reasoning unavailable');
   });
 });
