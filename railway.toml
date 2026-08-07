@@ -1,0 +1,19 @@
+# Trace on Railway — the deploy path that needs no payment method.
+#
+#   railway init && railway up
+#   railway variables --set CASPIAN_API_KEY=… --set TELEGRAM_BOT_TOKEN=… --set DATABASE_URL=…
+#
+# Deployed as a **worker**: no port, no domain, no healthcheck. Caspian's `listen()` is an outbound
+# long poll — Trace dials the gateway, the gateway never dials in — so there is nothing to bind and
+# nothing to health-check. `healthcheckPath` is deliberately absent: pointing one at a service that
+# serves no HTTP would fail the deploy on a system that is working perfectly.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# The bot must come back by itself. A long poll can die on a network blip at 3am, and a worker that
+# stays down until someone notices is worse than no worker: the failure is completely silent.
+restartPolicyType = "ALWAYS"
+restartPolicyMaxRetries = 10

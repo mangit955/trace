@@ -129,28 +129,46 @@ continues the thread.
 > through the same handler and needs nothing but Bun, so nothing here requires a live bot to
 > evaluate. Happy to bring it up for a scheduled window — open an issue and say when.
 
-This is a deliberate choice, not an unfinished one. The free always-on PaaS tier has effectively
-disappeared: Fly and Railway now require a card, Northflank and Render do too, Koyeb's free instance
-cannot run worker services and force-sleeps after an hour, and Hugging Face now bills Docker Spaces.
-Every remaining free option sleeps on inactivity — and because Trace receives no inbound HTTP by
-design (see below), sleeping is exactly what they would do. A bot that is silently asleep when a
-reviewer messages it is worse than one that is honestly documented as off.
+Deploy instructions are below and the container is verified — bringing it up permanently is a
+`railway up` away.
 
 ### Deploying it
 
-It is packaged and ready — `Dockerfile` and `fly.toml` are committed and both were verified by
-building and running the image. The image is host-agnostic; any container host works.
+Packaged and ready: `Dockerfile`, `railway.toml` and `fly.toml` are committed, and the image was
+verified by building and running it rather than by inspection. The image is host-agnostic — deploy
+it anywhere, as long as it runs as a **worker**.
+
+**Railway + Neon** (no payment method required to start):
 
 ```bash
-brew install flyctl && fly auth login       # or: curl -L https://fly.io/install.sh | sh
-fly launch --no-deploy --copy-config --region iad
-fly secrets set CASPIAN_API_KEY=… TELEGRAM_BOT_TOKEN=… GEMINI_API_KEY=…
-fly deploy
-fly status                                  # the machine must read "started"
-fly logs                                    # expect: "[trace] telegram connected (active)"
+npm i -g @railway/cli && railway login
+railway init && railway up                  # builds the Dockerfile, runs it as a worker
+railway variables --set CASPIAN_API_KEY=… --set TELEGRAM_BOT_TOKEN=… --set GEMINI_API_KEY=…
+railway logs                                # expect: "[trace] telegram connected (active)"
 ```
 
-Or anywhere else that runs a container:
+For persistence, create a free Postgres on [Neon](https://neon.com) and set `DATABASE_URL`. Neon
+supports pgvector on every plan, and migration `0002` runs `create extension if not exists vector`
+itself, so there is no manual step:
+
+```bash
+railway variables --set DATABASE_URL='postgres://…@…neon.tech/trace?sslmode=require'
+```
+
+> **Verify your Railway account** (connect GitHub) before relying on it. Unverified trial accounts
+> get **restricted outbound network access**, and Trace is *entirely* outbound — it long-polls the
+> Caspian gateway and calls Gemini. A restricted account fails in a way that looks like a broken
+> bot rather than a blocked network.
+
+**Fly** works too, but now requires a card on file:
+
+```bash
+fly launch --no-deploy --copy-config --region iad
+fly secrets set CASPIAN_API_KEY=… TELEGRAM_BOT_TOKEN=… GEMINI_API_KEY=…
+fly deploy && fly status                    # the machine must read "started"
+```
+
+Or plain Docker, anywhere:
 
 ```bash
 docker build -t trace . && docker run --env-file .env trace
