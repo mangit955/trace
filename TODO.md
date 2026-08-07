@@ -55,7 +55,7 @@ quality, adoption/usage signal, and how idiomatically Caspian is used as the com
 - [x] Add MIT `LICENSE`
 - [x] Copy this file to `TODO.md`
 - [x] `git init`, initial commit
-- [ ] **Confirm with user before creating the public GitHub repo** (outward-facing action), then push
+- [x] Public GitHub repo — `origin` is `github.com/mangit955/trace`
 
 ## Phase 1 — `packages/domain`
 
@@ -322,29 +322,98 @@ The spine. Zod only, zero I/O.
 
 ## Phase 6 — Ship
 
-- [ ] `bun run dev` — in-memory, no Docker, no credentials, fully working agent
-- [ ] `docker compose up` — Postgres path
-- [ ] `.env.example` — `CASPIAN_API_KEY` (free/instant, the only required one), `GEMINI_API_KEY`,
-      `TELEGRAM_BOT_TOKEN`, `GITHUB_TOKEN`, `TRACE_ONCALL_RECIPIENTS`, `DATABASE_URL`,
-      `TRACE_ORG_ID` (leave unset for the single-tenant default; changing it after data exists hides
-      every investigation already stored),
-      `TRACE_ENABLE_SLACK`, `SLACK_CONNECTION_ID` (printed by the first Slack install; saving it is
-      what stops the next start minting a second one), `TRACE_SLACK_DISPLAY_NAME`,
-      `TRACE_SLACK_ICON_URL`, `TRACE_ALERT_PORT`
-- [ ] README: problem, quickstart, how to talk to it, architecture, the four-criteria write-up,
-      honest statement of which mode a reviewer is seeing (recorded vs live), and the note that
-      free LLM tiers train on prompts so production must not point one at real telemetry
-- [ ] Deploy the Telegram bot (running locally as **@trace_b_bot**, connection active); put the
-      handle in the README
-- [ ] CI: `bun test` + `biome check` + `tsc --noEmit`
+- [x] `bun run dev` — in-memory, no Docker, no credentials. Verified on a **clean checkout**
+      (rsync without `node_modules`/`.env`), following the README verbatim: `bun install` then
+      `bun run dev` gives the cited report, and `bun test` there is 459 pass / 1 skip.
+- [x] `docker compose up` — Postgres path re-verified end to end: `investigate INC-481` twice
+      across a restart returns the **stored** report (`why` resolves to the same hypotheses), and
+      the real tenant still holds exactly **1** investigation row for INC-481. (The table has 57
+      across all orgs — one per random tenant minted by the contract suite, which is the tenant
+      filter working.)
+- [x] `.env.example` — every variable **actually read**, found by grepping `packages` + `apps`
+      rather than from this list: it was missing `TRACE_GITHUB_REPOS` and `GEMINI_MODEL`, and
+      `GITHUB_TOKEN` alone does nothing without the repo list. Each entry states the consequence of
+      leaving it unset.
+- [x] README — problem, quickstart with a **real captured transcript**, the mode table (recorded vs
+      live vs live+GitHub vs Postgres), architecture, the eight invariants, the Slack blocker stated
+      plainly with its evidence, the free-tier-trains-on-prompts caveat, and the cut list.
+- [x] `Dockerfile` + `.dockerignore` + `fly.toml`. Verified by **building and running the image**,
+      not by reading it: `bun start` with no key exits 1 with guidance, `bun run dev` inside the
+      container produces the full report, and `.env` is confirmed absent from the image.
+      `oven/bun:1.3.13-alpine` pinned to the exact local Bun (tag confirmed against the Docker Hub
+      API). `fly.toml` deliberately has **no `[http_service]`**: `listen()` is an outbound long
+      poll, so a host that stops the container on "no HTTP traffic" silently kills the bot. My first
+      draft had a `[machine] auto_destroy` block — checked against Fly's config reference and there
+      is no such section; removed.
+- [ ] Deploy the Telegram bot (running locally as **@trace_b_bot**, connection active). Dockerfile
+      and fly.toml ready; `flyctl` is not installed on this machine, so the deploy itself is the
+      operator's to run. README carries the exact command sequence.
+- [x] CI — `.github/workflows/ci.yml`, two jobs on push and PR. **check**: `bun test`, `bun run
+      typecheck`, `bun run lint` (all three; the runner strips types). **postgres**: the same suite
+      with a `pgvector/pgvector:pg17` service container and `TRACE_TEST_DATABASE_URL`, so
+      `describeStoreContract` runs against real SQL — the job that would have caught Phase 5's 13
+      Postgres-only failures. Both pinned to `oven-sh/setup-bun@v2` and bun 1.3.13. Proven locally
+      first; CI reports **499 pass, 0 skip**. The count is the check, not the tick: a run that had
+      silently skipped Postgres would be just as green.
+- [x] Four defects found by running it, none of which the suite could see, all now tested:
+      1. **A free-form question on the credential-free path returned bare help text.**
+         `NoAnswererError` already carried the exact right sentence — "Set GEMINI_API_KEY to enable
+         them" — and a bare `catch` in `handler.ts` threw it away. The one moment a reviewer is
+         most likely to hit, and a missing key was indistinguishable from a broken bot. The
+         *other* branch of that catch — an answer rejected for citing uncollected evidence —
+         deliberately keeps degrading silently: that is a safety property, not a configuration gap,
+         and naming a credential there would imply setting one makes the ungrounded answer appear.
+      2. **A failing collector took down the whole investigation.** Found by running the
+         collector-failure path below. `unreasonedReport` now keeps the invariant: the timeline and
+         the blind spots are *computed*, so they stand whether or not a model answered. No
+         hypotheses at all rather than an uncited guess.
+      3. Two rendering defects visible only in the output of (2): the error's trailing full stop
+         landed mid-sentence as `E14..`, and the footer read `gemini-2.5-flash (replayed)
+         (reasoning unavailable)`. `why` on a degraded report also printed "Here is my reasoning,
+         and the evidence behind it." followed by nothing at all.
+      4. A 429 storm dumped a **stack trace** through Bun's internals for similarity indexing — a
+         feature explicitly designed to fail quietly. Every other `console.error` in the repo logs
+         `error.message`; these two logged the object.
+- [x] **Integrity review of the above, which found three defects in the fix itself.** The degraded
+      report was the right idea implemented three ways wrong, and all three were invisible to the
+      suite that had just gone green:
+      1. **A transient failure became permanent.** The degraded report was *stored*, and a stored
+         report is never regenerated while `ready` is terminal — so a single 429 meant every later
+         ask replayed the apology and that incident could never be reasoned about again. This was a
+         regression against the previous behaviour, where the failure left the investigation in
+         `reasoning` and a retry worked. Proven by driving a reasoner that fails once and then
+         recovers: run 1 degraded, run 2 **still** degraded. Now: degraded reports are shown and
+         never written, so the next ask reasons over the same immutable evidence and succeeds the
+         moment the quota returns. Run 2 now reads `REASONED — recovered`, and `why` after it gives
+         real reasoning.
+      2. **The incident was fingerprinted by its own error message.** `similaritySourceText` folds
+         the report summary into the embedding, so a degraded incident was indexed as *"could not
+         reason about it: 429 quota exceeded"* — making its nearest neighbour every other incident
+         that hit a rate limit, i.e. a confident and completely wrong "we have seen this before".
+         `SimilaritySourceInput.report` was already optional and documented *"Absent when reasoning
+         failed"*; the intent existed and the new code simply never honoured it. Fixed on both the
+         index and the query side, including the second call site on the already-`ready` path.
+      3. **The page said "I am reconstructing what happened now."** With no leading hypothesis the
+         alert fell through to that default, which is false the moment reasoning *fails* rather
+         than stalls — someone woken at 3am would wait for a follow-up that never comes, while the
+         timeline they could use sat one "why" away. Test confirmed to bite by reverting the fix.
+      Also caught here: `reasoned` is now returned explicitly rather than inferred from
+      `hypotheses.length === 0`. That inference holds today only because `ReasonedOutput` requires
+      `.min(1)` hypotheses in a zod schema two packages away, and the failure mode of that coupling
+      silently breaking is a degraded report stored as final.
+      One more from this pass, and the reason `bun run typecheck` is not optional: a stub `Embedder`
+      in a new test set a `name` property the interface does not have. `bun test` passed it; `tsc`
+      caught it.
 
 ---
 
 ## Verification
 
-- [ ] `bun test` green: serializer determinism (golden files), citation validator rejects
-      hallucinated ids, state machine rejects illegal transitions, registry namespacing,
-      `assertValidEvidenceKind` across all core kinds
+- [x] `bun test` green: serializer determinism, citation validator rejects hallucinated ids, state
+      machine rejects illegal transitions, registry namespacing, `assertValidEvidenceKind` across
+      all core kinds. **463 pass / 1 skip** credential-free, **499 pass** with
+      `TRACE_TEST_DATABASE_URL` set; typecheck clean across all five workspaces; `bun run lint`
+      exits 0 with no warnings.
 - [x] End-to-end with **no database and no credentials**: `bun run dev` gives a cited report for
       `investigate INC-481`, and `why` resolves to that thread. Also verified over live Telegram
       with credentials present.
@@ -355,9 +424,24 @@ The spine. Zod only, zero I/O.
       Proven in test — one script driven through both channels asserts identical `text` *and*
       `blocks` — and live on Telegram, but **not** live on Slack: no Slack message has ever reached
       the gateway (see Phase 4). Blocked upstream, not by the handler.
-- [ ] Collector failure path: break credentials, investigation still completes and reports the gap
-- [ ] Rate-limit path: simulate `429`, investigation still completes via recorded fallback
-- [ ] `git log -p | grep` for secrets — nothing sensitive committed
+- [x] Collector failure path: **this one bit.** Run with `GITHUB_TOKEN=ghp_…invalid` and a real
+      `TRACE_GITHUB_REPOS`, the live collector displaces its seeded stand-in and then 401s, the
+      evidence set shrinks — and the recorded response cited `E16`, which no longer existed. The
+      citation gate rejected the whole response (correctly), and the investigation came back as
+      *"Sorry — something went wrong"*, throwing away a perfectly good timeline. The fix is not to
+      loosen the gate: `unreasonedReport` reports the reconstruction without an interpretation of
+      it. Now observed: full 10-event timeline, `What I could not see: github failed: GitHub
+      returned 401 for /repos/acme/payments-api/deployments`, zero hypotheses, and a footer that
+      reads `gemini-2.5-flash (replayed) — reasoning unavailable` rather than "Reasoned by".
+- [x] Rate-limit path: `globalThis.fetch` stubbed to 429 for
+      `generativelanguage.googleapis.com` with a key present, driven through `buildDeps` +
+      `handleMessage`. **9 Gemini calls, all 429, report still delivered in 6.0s** via the
+      recording, honestly labelled `(replayed)`. Both embedder failures degraded to one log line
+      each. Throwaway script deleted.
+- [x] `git log -p | grep` for secrets across **all** history (`AIza`, `ghp_`, `github_pat_`,
+      `xoxb-`, `xapp-`, Telegram bot-token shape, `sk-`): **zero matches**. `.env` is ignored at
+      `.gitignore:3` and has never been tracked; `.dockerignore` keeps it out of the image, which
+      was confirmed by looking inside the built image rather than by reading the file.
 
 ## Submission
 

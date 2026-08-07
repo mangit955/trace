@@ -1,8 +1,10 @@
 import { collectEvidence } from '@trace/collectors';
 import {
   buildEvidenceGraph,
+  type CollectorRun,
   createInvestigation,
   defaultWindowFor,
+  type EvidenceGraph,
   type ExternalRef,
   type Investigation,
   transition,
@@ -11,6 +13,7 @@ import {
   type InvestigationReport,
   reasonAboutInvestigation,
   similaritySourceText,
+  unreasonedReport,
 } from '@trace/reasoner';
 import type { AgentDeps } from './handler.ts';
 import type { Precedent } from './render.ts';
@@ -36,6 +39,10 @@ export interface InvestigationOutcome {
 /** How many prior incidents to show. Three is a hint; ten is a second report to read. */
 const MAX_PRECEDENTS = 3;
 
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * The report for an investigation — the one the engineer was actually shown.
  *
@@ -50,20 +57,88 @@ export async function reportForInvestigation(
   deps: AgentDeps,
   investigation: Investigation,
 ): Promise<InvestigationReport> {
+  return (await reportOrDegraded(deps, investigation)).report;
+}
+
+/** As `reportForInvestigation`, but says whether a model actually produced what it returns. */
+async function reportOrDegraded(deps: AgentDeps, investigation: Investigation): Promise<Reasoned> {
+  // A stored report is a reasoned one by construction — the degraded path never writes.
   const stored = await deps.store.reports.findFor(deps.tenant, investigation.id);
-  if (stored) return stored;
+  if (stored) return { report: stored, reasoned: true };
 
-  const report = await reasonAboutInvestigation({
+  const outcome = await reasonOrDegrade(
+    deps,
     investigation,
-    graph: await deps.store.evidence.loadGraph(deps.tenant, investigation.id),
-    registry: deps.registry,
-    runs: await deps.store.collectorRuns.listFor(deps.tenant, investigation.id),
-    reasoner: deps.reasoner,
-    now: deps.clock.now(),
-  });
+    await deps.store.evidence.loadGraph(deps.tenant, investigation.id),
+    await deps.store.collectorRuns.listFor(deps.tenant, investigation.id),
+  );
 
-  await deps.store.reports.save(deps.tenant, report);
-  return report;
+  // Only a real report is stored. See `runInvestigation` — persisting a degraded one makes a
+  // transient outage permanent, because a stored report is never regenerated.
+  if (outcome.reasoned) await deps.store.reports.save(deps.tenant, outcome.report);
+  return outcome;
+}
+
+/**
+ * Reasons about the evidence, or reports the reconstruction without an interpretation of it.
+ *
+ * The invariant is "a partial investigation is a success", and it turns out to apply one step later
+ * than it was written for. The timeline and the blind spots are *computed* — projected off the
+ * graph and off collector runs — so they are exactly as sound whether or not the model answered.
+ * Letting a reasoner failure propagate discarded them and handed the user "Sorry, something went
+ * wrong", which is the outcome that invariant exists to prevent.
+ *
+ * Hit for real, not imagined: with a broken `GITHUB_TOKEN` the live collector displaces its seeded
+ * stand-in and then fails, the evidence set shrinks, and the recorded response cites a node that is
+ * no longer in it. The citation gate rejects the whole response, correctly — the answer is not to
+ * loosen the gate but to keep reporting the part the model never wrote.
+ */
+async function reasonOrDegrade(
+  deps: AgentDeps,
+  investigation: Investigation,
+  graph: EvidenceGraph,
+  runs: readonly CollectorRun[],
+): Promise<Reasoned> {
+  try {
+    const report = await reasonAboutInvestigation({
+      investigation,
+      graph,
+      registry: deps.registry,
+      runs,
+      reasoner: deps.reasoner,
+      now: deps.clock.now(),
+    });
+    return { report, reasoned: true };
+  } catch (error) {
+    const reason = messageOf(error);
+    console.error(`[trace] reasoning failed for ${investigation.externalRef.id}: ${reason}`);
+
+    return {
+      report: unreasonedReport({
+        investigation,
+        graph,
+        registry: deps.registry,
+        runs,
+        reasonerModel: deps.reasoner.model,
+        reason,
+        now: deps.clock.now(),
+      }),
+      reasoned: false,
+    };
+  }
+}
+
+/**
+ * A report, and whether a model actually produced it.
+ *
+ * Reported explicitly rather than inferred from `hypotheses.length === 0`. That inference happens
+ * to hold today — `ReasonedOutput` requires at least one hypothesis — but it couples this file to a
+ * `.min(1)` in a zod schema two packages away, and the consequence of the coupling silently
+ * breaking is that a degraded report gets stored as final.
+ */
+interface Reasoned {
+  report: InvestigationReport;
+  reasoned: boolean;
 }
 
 export async function runInvestigation(
@@ -79,11 +154,13 @@ export async function runInvestigation(
   // because both the chat handler and the alert webhook can arrive at an incident already done.
   const existing = await deps.store.investigations.findByExternalRef(deps.tenant, externalRef);
   if (existing?.status === 'ready') {
-    const report = await reportForInvestigation(deps, existing);
+    const { report, reasoned } = await reportOrDegraded(deps, existing);
     return {
       investigation: existing,
       report,
-      precedents: await findPrecedents(deps, existing, report),
+      // Same guard as below: a degraded summary is an error message, and embedding it would ask
+      // "which past incident is most like this rate limit?" rather than like this outage.
+      precedents: await findPrecedents(deps, existing, reasoned ? report : undefined),
     };
   }
 
@@ -114,24 +191,26 @@ export async function runInvestigation(
   const reasoning = transition(collecting, 'reasoning', deps.clock.now());
   await deps.store.investigations.save(deps.tenant, reasoning);
 
-  const report = await reasonAboutInvestigation({
-    investigation: reasoning,
-    graph: buildEvidenceGraph({
-      investigationId: reasoning.id,
-      nodes: collected.nodes,
-      edges: collected.edges,
-    }),
-    registry: deps.registry,
-    runs: collected.runs,
-    reasoner: deps.reasoner,
-    now: deps.clock.now(),
+  const graph = buildEvidenceGraph({
+    investigationId: reasoning.id,
+    nodes: collected.nodes,
+    edges: collected.edges,
   });
 
-  for (const hypothesis of report.hypotheses) {
-    await deps.store.hypotheses.save(deps.tenant, hypothesis);
+  const { report, reasoned } = await reasonOrDegrade(deps, reasoning, graph, collected.runs);
+
+  if (reasoned) {
+    for (const hypothesis of report.hypotheses) {
+      await deps.store.hypotheses.save(deps.tenant, hypothesis);
+    }
+    // Stored whole, so every follow-up in the thread explains this report rather than a new one.
+    await deps.store.reports.save(deps.tenant, report);
   }
-  // Stored whole, so every follow-up in the thread explains this report rather than a new one.
-  await deps.store.reports.save(deps.tenant, report);
+  // A degraded report is shown but never stored. A stored report is *never* regenerated, and
+  // `ready` is terminal, so persisting one would turn a 429 — a normal Tuesday on a free tier —
+  // into a permanent verdict: every later ask would replay the apology and the incident could
+  // never be reasoned about again. Not storing it means the next ask reasons over the same
+  // immutable evidence and succeeds the moment the quota comes back.
 
   const ready = transition(reasoning, 'ready', deps.clock.now());
   await deps.store.investigations.save(deps.tenant, ready);
@@ -139,8 +218,13 @@ export async function runInvestigation(
   // Precedent is read *before* this investigation is indexed, so it cannot return itself as its own
   // nearest neighbour — `exclude` covers that too, but not indexing first means one fewer thing
   // depending on it.
-  const precedents = await findPrecedents(deps, ready, report);
-  await indexForSimilarity(deps, ready, report);
+  // The summary is folded into the embedding, so a degraded report would fingerprint this incident
+  // by its own error message — making its nearest neighbour every *other* incident that hit a rate
+  // limit. `SimilaritySourceInput.report` is optional for exactly this case: services and error
+  // signatures come off the graph and still make a usable vector.
+  const fingerprint = reasoned ? report : undefined;
+  const precedents = await findPrecedents(deps, ready, fingerprint);
+  await indexForSimilarity(deps, ready, fingerprint);
 
   return { investigation: ready, report, precedents };
 }
@@ -155,7 +239,7 @@ export async function runInvestigation(
 async function indexForSimilarity(
   deps: AgentDeps,
   investigation: Investigation,
-  report: InvestigationReport,
+  report: InvestigationReport | undefined,
 ): Promise<void> {
   if (!deps.embedder) return;
 
@@ -170,7 +254,10 @@ async function indexForSimilarity(
       model: deps.embedder.model,
     });
   } catch (error) {
-    console.error('[trace] could not index for similarity:', error);
+    // The message, not the object. This path is designed to fail quietly — a rate-limited embedder
+    // is a normal Tuesday on a free tier — and dumping a stack trace through Bun's internals for a
+    // convenience feature makes a working system look like it is crashing.
+    console.error(`[trace] could not index for similarity: ${messageOf(error)}`);
   }
 }
 
@@ -178,7 +265,7 @@ async function indexForSimilarity(
 async function findPrecedents(
   deps: AgentDeps,
   investigation: Investigation,
-  report: InvestigationReport,
+  report: InvestigationReport | undefined,
 ): Promise<readonly Precedent[]> {
   if (!deps.embedder) return [];
 
@@ -206,7 +293,7 @@ async function findPrecedents(
       .filter((match) => match.score >= (deps.embedder?.minSimilarity ?? 1))
       .map((match) => ({ incidentId: match.externalRef.id, score: match.score }));
   } catch (error) {
-    console.error('[trace] could not look up similar investigations:', error);
+    console.error(`[trace] could not look up similar investigations: ${messageOf(error)}`);
     return [];
   }
 }

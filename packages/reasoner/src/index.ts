@@ -40,6 +40,8 @@ export {
   type ReasonAboutInvestigationInput,
   reasonAboutInvestigation,
   type TimelineEntry,
+  type UnreasonedReportInput,
+  unreasonedReport,
 } from './report.ts';
 export { GEMINI_RESPONSE_SCHEMA } from './schema.ts';
 export {

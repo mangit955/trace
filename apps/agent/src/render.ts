@@ -110,7 +110,10 @@ export function renderReport(
   lines.push('');
   // Names the model verbatim, which for the credential-free demo reads "(replayed)". A report
   // that let a recording pass for live reasoning would misrepresent itself to a reviewer.
-  lines.push(`Reasoned by ${report.model}`);
+  //
+  // With no hypotheses there was no reasoning, so "Reasoned by" would be a small lie in the one
+  // place the report is admitting a limitation. The model string says what happened by itself.
+  lines.push(leading ? `Reasoned by ${report.model}` : report.model);
 
   return { text: lines.join('\n'), blocks: reportBlocks(report, incidentId, precedents) };
 }
@@ -214,6 +217,19 @@ export function renderReasoning(report: InvestigationReport | undefined): Reply 
     };
   }
 
+  // No hypotheses means reasoning failed and the report is the bare reconstruction. Printing the
+  // usual header over nothing at all reads as a broken bot; the report's own summary already says
+  // exactly what went wrong, so repeat it rather than invent a second explanation.
+  if (report.hypotheses.length === 0) {
+    return {
+      text: `I have no reasoning to show for this one.\n\n${report.summary}`,
+      blocks: [
+        { type: 'heading', text: 'Reasoning' },
+        { type: 'text', text: `I have no reasoning to show for this one. ${report.summary}` },
+      ],
+    };
+  }
+
   const lines = ['Here is my reasoning, and the evidence behind it.', ''];
 
   for (const hypothesis of report.hypotheses) {
@@ -249,8 +265,17 @@ export function renderReasoning(report: InvestigationReport | undefined): Reply 
   };
 }
 
-export function renderHelp(): Reply {
+/**
+ * What Trace can do.
+ *
+ * `note` explains why the user is seeing this instead of what they asked for, and is only ever
+ * passed for a *configuration* gap. A failure that is a safety property — an answer rejected for
+ * citing evidence nobody collected — deliberately gets no note: naming a credential there would
+ * imply that setting one makes the ungrounded answer appear.
+ */
+export function renderHelp(note?: string): Reply {
   const lines = [
+    ...(note ? [note, ''] : []),
     'I reconstruct what happened during an incident. I do not fix anything.',
     '',
     'Try:',
@@ -265,6 +290,7 @@ export function renderHelp(): Reply {
     text: lines.join('\n'),
     blocks: [
       { type: 'heading', text: 'Trace' },
+      ...(note ? [{ type: 'text' as const, text: note }] : []),
       {
         type: 'text',
         text: 'I reconstruct what happened during an incident. I do not fix anything.',

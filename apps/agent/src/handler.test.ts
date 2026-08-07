@@ -139,7 +139,39 @@ describe('help and unrecognised messages', () => {
       inbound('was the pool ever raised back?', 'telegram:1'),
     );
 
-    expect(reply.text).toMatch(/investigate|GEMINI_API_KEY/);
+    expect(reply.text).toMatch(/investigate/);
+  });
+
+  test('says free-form answers need a key, rather than silently showing help', async () => {
+    // Found by running the credential-free REPL: asking a question returned bare help text, so a
+    // reviewer could not tell a missing key from a broken bot. `NoAnswererError` already carried
+    // exactly the right sentence and the handler was discarding it.
+    await handleMessage(shared, inbound('investigate INC-481', 'telegram:1'));
+
+    const reply = await handleMessage(shared, inbound('who deployed it?', 'telegram:1'));
+
+    expect(reply.text).toContain('GEMINI_API_KEY');
+  });
+
+  test('stays quiet about why when an answer fails its citation check', async () => {
+    // The other branch of the same catch, and it must NOT gain an explanation: an ungrounded answer
+    // is a safety failure, not a configuration gap, and naming a credential would suggest that
+    // setting one makes the ungrounded answer appear.
+    const ungrounded = deps({
+      reasoner: {
+        name: 'ungrounded',
+        model: 'ungrounded-1',
+        reason: defaultRecordedReasoner().reason.bind(defaultRecordedReasoner()),
+        // E999 was never collected, so `assertGrounded` rejects this on the way out.
+        answer: async () => 'It was the flag [E999].',
+      },
+    });
+    await handleMessage(ungrounded, inbound('investigate INC-481', 'telegram:1'));
+
+    const reply = await handleMessage(ungrounded, inbound('who deployed it?', 'telegram:1'));
+
+    expect(reply.text).not.toContain('GEMINI_API_KEY');
+    expect(reply.text).toContain('investigate');
   });
 });
 
@@ -214,6 +246,50 @@ describe('surviving failure', () => {
     expect(reply.text).toMatch(/sorry|went wrong/i);
   });
 
+  test('still reports the reconstruction when the reasoner fails', async () => {
+    // "A partial investigation is a success" applies one step later than it was written for. The
+    // timeline and the blind spots are computed from evidence, not written by the model, so a
+    // failed reasoner must not take them down with it. Hit for real by pointing a broken
+    // GITHUB_TOKEN at the credential-free path: the evidence set shrank, the recorded response
+    // cited a node that was gone, and the whole investigation came back as an apology.
+    const failing = deps({
+      reasoner: {
+        name: 'failing',
+        model: 'failing-1',
+        reason: async () => {
+          throw new Error('the recorded response cites evidence that was not collected');
+        },
+      },
+    });
+
+    const reply = await handleMessage(failing, inbound('investigate INC-481', 'c:1'));
+
+    expect(reply.text).not.toMatch(/sorry|went wrong/i);
+    // The reconstruction survives: the deploy is still there, in order.
+    expect(reply.text).toContain('Timeline:');
+    expect(reply.text).toContain('v2.4.1');
+    // And it says why there is no conclusion, rather than inventing one.
+    expect(reply.text).toContain('could not reason about it');
+    expect(reply.text).not.toContain('Most likely');
+  });
+
+  test('a follow-up after a failed reasoner explains the degradation, not a fabrication', async () => {
+    const failing = deps({
+      reasoner: {
+        name: 'failing',
+        model: 'failing-1',
+        reason: async () => {
+          throw new Error('nope');
+        },
+      },
+    });
+    await handleMessage(failing, inbound('investigate INC-481', 'c:1'));
+
+    const why = await handleMessage(failing, inbound('why', 'c:1'));
+
+    expect(why.text).not.toMatch(/sorry|went wrong/i);
+  });
+
   test('never rethrows, whatever happens', async () => {
     const broken = deps({
       collectorsFor: () => {
@@ -250,7 +326,7 @@ describe('follow-ups reuse the report that was shown', () => {
       reasoner: {
         name: 'counting',
         model: 'counting-1',
-        reason: async (request) => {
+        reason: async () => {
           reasonCalls++;
           return {
             summary: `run ${reasonCalls} [E1]`,
@@ -302,5 +378,82 @@ describe('follow-ups reuse the report that was shown', () => {
     await handleMessage(counting, inbound('show deploy', 'c:1'));
 
     expect(reasonCalls).toBe(1);
+  });
+});
+
+describe('a failed reasoner must not be permanent', () => {
+  /** A reasoner that fails until `fail` is cleared — a rate limit, not a broken deployment. */
+  function flaky() {
+    const state = { fail: true };
+    const real = defaultRecordedReasoner();
+    const subject = deps({
+      reasoner: {
+        name: 'flaky',
+        model: 'flaky-1',
+        reason: async (request) => {
+          if (state.fail) throw new Error('429 quota exceeded (transient)');
+          return await real.reason(request);
+        },
+      },
+    });
+    return { deps: subject, state };
+  }
+
+  test('re-asking after the rate limit clears gives a real report', async () => {
+    // A 429 is a normal Tuesday on a free tier. Storing the degraded report would make a transient
+    // outage permanent: `ready` is terminal, so every later ask returns the stored apology and the
+    // incident can never be reasoned about again.
+    const { deps: subject, state } = flaky();
+
+    const down = await handleMessage(subject, inbound('investigate INC-481', 'c:1'));
+    expect(down.text).toContain('could not reason about it');
+
+    state.fail = false;
+    const back = await handleMessage(subject, inbound('investigate INC-481', 'c:2'));
+
+    expect(back.text).toContain('Most likely');
+    expect(back.text).not.toContain('could not reason about it');
+  });
+
+  test('does not persist a report it could not reason about', async () => {
+    const { deps: subject } = flaky();
+
+    await handleMessage(subject, inbound('investigate INC-481', 'c:1'));
+
+    const investigation = await subject.store.investigations.findByExternalRef(subject.tenant, {
+      system: 'pagerduty',
+      id: 'INC-481',
+    });
+    expect(investigation).toBeDefined();
+    if (investigation) {
+      expect(await subject.store.reports.findFor(subject.tenant, investigation.id)).toBeUndefined();
+    }
+  });
+
+  test('does not fingerprint the incident by its own error message', async () => {
+    // `similaritySourceText` folds the report summary into the embedding. Indexing "could not
+    // reason about it: 429 quota exceeded" would make this incident's nearest neighbour every
+    // *other* incident that hit a rate limit, which is a confident, wrong "we have seen this
+    // before" — the worst possible answer to that question.
+    const indexed: string[] = [];
+    const { deps: subject } = flaky();
+    const spying: AgentDeps = {
+      ...subject,
+      embedder: {
+        model: 'spy-1',
+        minSimilarity: 0.9,
+        embed: async (text: string) => {
+          indexed.push(text);
+          return [1, 0, 0];
+        },
+      },
+    };
+
+    await handleMessage(spying, inbound('investigate INC-481', 'c:1'));
+
+    expect(indexed.length).toBeGreaterThan(0);
+    for (const text of indexed) expect(text).not.toContain('could not reason about it');
+    // The real fingerprint survives: services and error signatures come off the graph.
+    expect(indexed.some((text) => text.includes('payments-api'))).toBe(true);
   });
 });

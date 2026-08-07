@@ -184,3 +184,40 @@ describe('rendering help', () => {
     expect(reply.text).toContain('why');
   });
 });
+
+describe('a report with no reasoning behind it', () => {
+  test('does not claim to have been reasoned by anything', () => {
+    // "Reasoned by X" under a report that explicitly says it could not reason is a small lie in
+    // exactly the place the report is being honest about its limits. The shape here is what
+    // `unreasonedReport` produces: timeline and gaps intact, no hypotheses at all.
+    const degraded: InvestigationReport = {
+      ...report,
+      hypotheses: [],
+      summary: 'I reconstructed what happened, but could not reason about it: nope. …',
+      model: 'gemini-2.5-flash (replayed) — reasoning unavailable',
+    };
+
+    const rendered = renderReport(degraded, 'INC-481');
+
+    expect(rendered.text).not.toContain('Reasoned by');
+    expect(rendered.text).toContain('reasoning unavailable');
+    // The trailing stop on the error must not survive into mid-sentence as "collected.."
+    expect(rendered.text).not.toContain('..');
+  });
+
+  test('"why" says there is no reasoning rather than printing an empty heading', () => {
+    // Observed: `why` on a degraded report rendered "Here is my reasoning, and the evidence behind
+    // it." followed by nothing whatsoever.
+    const degraded: InvestigationReport = {
+      ...report,
+      hypotheses: [],
+      suggestedQuestions: [],
+      summary: 'I reconstructed what happened, but could not reason about it: the key is missing.',
+    };
+
+    const rendered = renderReasoning(degraded);
+
+    expect(rendered.text).not.toContain('Here is my reasoning');
+    expect(rendered.text).toContain('could not reason about it');
+  });
+});
