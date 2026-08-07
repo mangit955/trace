@@ -353,7 +353,8 @@ The spine. Zod only, zero I/O.
       with a `pgvector/pgvector:pg17` service container and `TRACE_TEST_DATABASE_URL`, so
       `describeStoreContract` runs against real SQL — the job that would have caught Phase 5's 13
       Postgres-only failures. Both pinned to `oven-sh/setup-bun@v2` and bun 1.3.13. Proven locally
-      first: 486 pass against real Postgres.
+      first; CI reports **495 pass, 0 skip**. The count is the check, not the tick: a run that had
+      silently skipped Postgres would be just as green.
 - [x] Four defects found by running it, none of which the suite could see, all now tested:
       1. **A free-form question on the credential-free path returned bare help text.**
          `NoAnswererError` already carried the exact right sentence — "Set GEMINI_API_KEY to enable
@@ -380,7 +381,7 @@ The spine. Zod only, zero I/O.
 
 - [x] `bun test` green: serializer determinism, citation validator rejects hallucinated ids, state
       machine rejects illegal transitions, registry namespacing, `assertValidEvidenceKind` across
-      all core kinds. **459 pass / 1 skip** credential-free, **486 pass** with
+      all core kinds. **459 pass / 1 skip** credential-free, **495 pass** with
       `TRACE_TEST_DATABASE_URL` set; typecheck clean across all five workspaces; `bun run lint`
       exits 0 with no warnings.
 - [x] End-to-end with **no database and no credentials**: `bun run dev` gives a cited report for
