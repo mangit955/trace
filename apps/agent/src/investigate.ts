@@ -190,6 +190,10 @@ async function findPrecedents(
 
     const found = await deps.store.similarity.findSimilar(deps.tenant, {
       embedding,
+      // Only incidents indexed by *this* model are comparable. After a model change precedent goes
+      // quiet until they are re-indexed, which is the right failure: a wrong "we have seen this
+      // before" sends an on-call engineer down a path unrelated to the incident in front of them.
+      model: deps.embedder.model,
       limit: MAX_PRECEDENTS,
       exclude: investigation.id,
     });

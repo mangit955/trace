@@ -530,6 +530,7 @@ export function describeStoreContract(name: string, subject: StoreUnderTest): vo
       const pool = axis(0);
       const poolish = blend(0.9, 0.1);
       const unrelated = axis(2);
+      const MODEL = 'lexical-v1';
 
       async function indexed(ctx: TenantContext, id: string, embedding: readonly number[]) {
         const investigation = await saved(ctx, id);
@@ -537,7 +538,7 @@ export function describeStoreContract(name: string, subject: StoreUnderTest): vo
           investigationId: investigation.id,
           embedding,
           sourceText: `payments-api ${id}`,
-          model: 'lexical-v1',
+          model: MODEL,
         });
         return investigation;
       }
@@ -546,7 +547,11 @@ export function describeStoreContract(name: string, subject: StoreUnderTest): vo
         const near = await indexed(acme, 'INC-302', poolish);
         await indexed(acme, 'INC-115', unrelated);
 
-        const [first] = await store.similarity.findSimilar(acme, { embedding: pool, limit: 5 });
+        const [first] = await store.similarity.findSimilar(acme, {
+          embedding: pool,
+          model: MODEL,
+          limit: 5,
+        });
 
         expect(first?.investigationId).toBe(near.id);
         expect(first?.externalRef.id).toBe('INC-302');
@@ -556,7 +561,11 @@ export function describeStoreContract(name: string, subject: StoreUnderTest): vo
         await indexed(acme, 'INC-302', poolish);
         await indexed(acme, 'INC-115', unrelated);
 
-        const found = await store.similarity.findSimilar(acme, { embedding: pool, limit: 1 });
+        const found = await store.similarity.findSimilar(acme, {
+          embedding: pool,
+          model: MODEL,
+          limit: 1,
+        });
 
         expect(found).toHaveLength(1);
         expect(found[0]?.externalRef.id).toBe('INC-302');
@@ -568,6 +577,7 @@ export function describeStoreContract(name: string, subject: StoreUnderTest): vo
 
         const found = await store.similarity.findSimilar(acme, {
           embedding: pool,
+          model: MODEL,
           limit: 5,
           exclude: self.id,
         });
@@ -579,11 +589,16 @@ export function describeStoreContract(name: string, subject: StoreUnderTest): vo
         // The two stores compute this differently — JS here, `1 - (a <=> b)` in pgvector — so the
         // scale has to be asserted, not assumed, or a threshold tuned on one would misfire on the other.
         await indexed(acme, 'INC-302', pool);
-        const [exact] = await store.similarity.findSimilar(acme, { embedding: pool, limit: 1 });
+        const [exact] = await store.similarity.findSimilar(acme, {
+          embedding: pool,
+          model: MODEL,
+          limit: 1,
+        });
         expect(exact?.score).toBeCloseTo(1, 5);
 
         const [opposite] = await store.similarity.findSimilar(acme, {
           embedding: pool.map((x) => -x),
+          model: MODEL,
           limit: 1,
         });
         expect(opposite?.score).toBeCloseTo(0, 5);
@@ -600,10 +615,36 @@ export function describeStoreContract(name: string, subject: StoreUnderTest): vo
           model: 'lexical-v1',
         });
 
-        const found = await store.similarity.findSimilar(acme, { embedding: pool, limit: 5 });
+        const found = await store.similarity.findSimilar(acme, {
+          embedding: pool,
+          model: MODEL,
+          limit: 5,
+        });
 
         expect(found).toHaveLength(1);
         expect(found[0]?.score).toBeGreaterThan(0.9);
+      });
+
+      test('never matches a vector produced by a different embedding model', async () => {
+        // Two models do not share a vector space, so a similarity across them is not a weak signal,
+        // it is a meaningless number that still sorts. Seen in a live table: an incident indexed
+        // lexically scored 0.4943 against a Gemini query that should have matched it, purely
+        // because the operator had added an API key between the two runs.
+        const priorModel = await indexed(acme, 'INC-302', poolish);
+        await store.similarity.index(acme, {
+          investigationId: priorModel.id,
+          embedding: poolish,
+          sourceText: 'payments-api INC-302',
+          model: 'some-other-embedder-v2',
+        });
+
+        expect(
+          await store.similarity.findSimilar(acme, {
+            embedding: pool,
+            model: 'lexical-v1',
+            limit: 5,
+          }),
+        ).toEqual([]);
       });
 
       test('never returns another tenant’s incident history', async () => {
@@ -611,9 +652,9 @@ export function describeStoreContract(name: string, subject: StoreUnderTest): vo
         // leaks that another company had an outage.
         await indexed(acme, 'INC-302', poolish);
 
-        expect(await store.similarity.findSimilar(globex, { embedding: pool, limit: 5 })).toEqual(
-          [],
-        );
+        expect(
+          await store.similarity.findSimilar(globex, { embedding: pool, model: MODEL, limit: 5 }),
+        ).toEqual([]);
       });
     });
   });

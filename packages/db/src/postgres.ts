@@ -507,6 +507,9 @@ class PostgresSimilarity implements InvestigationSimilarityRepository {
       from investigation_embeddings e
       join investigations i on i.id = e.investigation_id and i.org_id = e.org_id
       where e.org_id = ${ctx.orgId}
+        -- Same vector space only. A lexically-indexed incident scored 0.4943 against a Gemini
+        -- query it should have matched, purely because a key was added between the two runs.
+        and e.model = ${input.model}
         -- The investigation being explained is trivially its own nearest neighbour. Written as a
         -- null-tolerant comparison so the same query serves both callers.
         and (${input.exclude ?? null}::uuid is null or e.investigation_id <> ${input.exclude ?? null}::uuid)

@@ -100,6 +100,20 @@ export interface IndexInvestigationInput {
 
 export interface FindSimilarInput {
   embedding: readonly number[];
+  /**
+   * The model that produced `embedding`. Required, and matched exactly.
+   *
+   * Two embedding models do not share a vector space, so a cosine similarity computed across them
+   * is not a weak signal — it is a meaningless number that still sorts. An operator who adds
+   * `GEMINI_API_KEY` to a deployment that had been indexing lexically ends up with both kinds in
+   * one table, and without this filter a genuine precedent scores 0.49 against a query it should
+   * have matched. Found by reading the scores in a live table, not by a test.
+   *
+   * The consequence is deliberate: after a model change, precedent goes quiet until incidents are
+   * re-indexed. Silence is the right failure here — a wrong "we have seen this before" sends an
+   * on-call engineer down a path that has nothing to do with the incident in front of them.
+   */
+  model: string;
   limit: number;
   /** The investigation being explained. It is trivially its own nearest neighbour. */
   exclude?: InvestigationId;

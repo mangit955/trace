@@ -232,7 +232,10 @@ class MemoryReports implements ReportRepository {
  * the same question the Postgres deploy does.
  */
 class MemorySimilarity implements InvestigationSimilarityRepository {
-  readonly #vectors = new Map<string, { investigationId: InvestigationId; embedding: number[] }>();
+  readonly #vectors = new Map<
+    string,
+    { investigationId: InvestigationId; embedding: number[]; model: string }
+  >();
 
   constructor(private readonly investigations: InvestigationRepository) {}
 
@@ -243,6 +246,7 @@ class MemorySimilarity implements InvestigationSimilarityRepository {
     this.#vectors.set(scoped(ctx, input.investigationId), {
       investigationId: input.investigationId,
       embedding: [...input.embedding],
+      model: input.model,
     });
   }
 
@@ -255,6 +259,9 @@ class MemorySimilarity implements InvestigationSimilarityRepository {
     for (const [key, entry] of this.#vectors) {
       if (!belongsTo(ctx, key)) continue;
       if (entry.investigationId === input.exclude) continue;
+      // Two embedding models do not share a vector space, so a similarity across them is a
+      // meaningless number that still sorts. Skipped rather than scored badly.
+      if (entry.model !== input.model) continue;
 
       const investigation = await this.investigations.findById(ctx, entry.investigationId);
       // An embedding whose investigation is gone is not a result. Nothing deletes investigations
