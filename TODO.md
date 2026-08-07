@@ -303,6 +303,15 @@ The spine. Zod only, zero I/O.
       after a CMS migration" showed as **87% similar** to a Redis outage. The floor is now a
       property of the `Embedder`, measured against the real pipeline query (the first calibration
       used hand-written text and set a floor that excluded a genuine match).
+      A fifth came out of the verification pass, from reading scores in a live table: `findSimilar`
+      filtered on tenant but **not on the embedding model**, so a table holding both kinds — which
+      is what you get the moment a key is added to a deployment that had been indexing lexically —
+      compared vectors from two different spaces. A `lexical-v1` incident scored 0.4943 against a
+      Gemini query that should have matched it. The `model` column already existed for this reason
+      and nothing read it; the query now matches on it in both stores.
+      The same pass also caught an over-claim of mine: the byte-identical serialization check had
+      compared a reloaded graph against *another reloaded* graph, proving determinism and not the
+      round-trip. Redone fresh-vs-reloaded, it holds at 3070 bytes.
       Verified holding: 482 tests green with Postgres and 447 without; migrations idempotent;
       restart returns the *stored* report with identical hypotheses and adds no second investigation
       row; a reloaded graph serialises byte-identically and its 14 citations still resolve with none
