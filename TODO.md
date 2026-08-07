@@ -345,24 +345,23 @@ The spine. Zod only, zero I/O.
       poll, so a host that stops the container on "no HTTP traffic" silently kills the bot. My first
       draft had a `[machine] auto_destroy` block — checked against Fly's config reference and there
       is no such section; removed.
-- [x] Telegram bot **packaged but deliberately not hosted**, and the README says so where a reviewer
-      will read it. Attempted on Fly, which now requires a payment method before it will run
-      machines. Surveyed the alternatives rather than assuming one would do: Koyeb's free instance
-      cannot run worker services *and* force-sleeps after an hour with no way to disable it (free
-      tier also closed to new signups post-Mistral); Northflank and Render require a card; Hugging
-      Face now bills Docker Spaces and free hardware sleeps at 48h regardless; Oracle Always Free is
-      genuinely always-on but needs card verification and is a VM to administer.
-      Every remaining free option **sleeps on inactivity**, and Trace receives no inbound HTTP by
-      design — `listen()` is an outbound long poll — so sleeping is precisely what they would do.
-      A bot that is silently asleep when a reviewer messages it reads as broken, which is strictly
-      worse than one documented as run-on-demand. So: `@trace_b_bot` is stated as on-demand in both
-      the quickstart and the channel-status section, with the note that the terminal path is the
-      same agent through the same handler and needs no live bot to evaluate.
-      The packaging is real and verified, not aspirational: `docker build` + `docker run --env-file`
-      both exercised, exiting 1 with actionable guidance on a missing key and on no channel
-      configured. A first `fly launch` attempt failed with `region any not found` — the checkout was
-      on `main`, where `fly.toml` does not exist, so flyctl fell back to its NodeJS scanner and had
-      no `primary_region`. Worth remembering: that error names the region, not the missing config.
+- [x] **Telegram bot deployed and live** — Railway worker (`railway.toml`: Dockerfile builder, no
+      port, no healthcheck, `restartPolicyType = ALWAYS`), reasoning against live Gemini.
+      Confirmed not by trusting the deploy but by reading the gateway's own message log:
+      `03:43:01 [inbound] Investigate INC-481` → ack at `:03` → full report at `:30`, on 2026-08-07,
+      and the report's wording differs from the recorded response — which is what proves it is
+      generating rather than replaying.
+      Route mattered here. Fly now requires a payment method; I had also summarised Railway as
+      card-required when the source said the opposite, and that error nearly cost a scored
+      criterion. Railway's Trial needs no card and a worker does not sleep. Neon covers Postgres
+      free — pgvector is on every plan and `0002` already runs `create extension if not exists
+      vector`, so no manual step. Railway config keys checked against their reference first, after
+      inventing a `[machine]` section in `fly.toml` earlier.
+      Two gotchas recorded: an unverified Railway account gets **restricted outbound** network
+      access, and Trace is entirely outbound; and a local instance left running alongside the
+      deploy double-polls the same connection and answers twice.
+      Observed latency live: ~27s to a full report against real Gemini (vs ~5s replayed), which the
+      `ack` exists to cover; follow-ups stay fast because the stored report is reused.
 - [x] CI — `.github/workflows/ci.yml`, two jobs on push and PR. **check**: `bun test`, `bun run
       typecheck`, `bun run lint` (all three; the runner strips types). **postgres**: the same suite
       with a `pgvector/pgvector:pg17` service container and `TRACE_TEST_DATABASE_URL`, so

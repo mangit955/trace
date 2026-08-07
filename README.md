@@ -124,13 +124,14 @@ The bot is **[@trace_b_bot](https://t.me/trace_b_bot)** on Telegram — `investi
 timeline list and deep-link buttons to the real deploy/PR/commit, with a `Why?` button that
 continues the thread.
 
-> **It is run on demand, not hosted 24/7 — so if it does not answer, it is not running, and that is
-> the expected state rather than a bug.** Reviewers: the terminal quickstart above is the same agent
-> through the same handler and needs nothing but Bun, so nothing here requires a live bot to
-> evaluate. Happy to bring it up for a scheduled window — open an issue and say when.
+**It is deployed and live** — a Railway worker with reasoning against live Gemini 2.5 Flash, so the
+report you get is generated for you rather than replayed. Just message the bot; there is nothing to
+install.
 
-Deploy instructions are below and the container is verified — bringing it up permanently is a
-`railway up` away.
+There is no deploy URL, and that is by design rather than an omission: Caspian's `listen()` is an
+*outbound* long poll, so Trace binds no port and serves no HTTP. The Telegram handle **is** the
+address. (The one optional inbound surface, the alert webhook, is off unless an operator sets
+`TRACE_ALERT_PORT`.)
 
 ### Deploying it
 
@@ -361,7 +362,10 @@ notification. Once per incident, allowlist only, and silent unless both variable
 free-form questions, native block rendering, deep-link buttons, and Caspian auto-threading each
 reply. Verified means *observed working over a real Telegram conversation*, not asserted — reading
 that conversation is what caught the `/start` and ack defects, and timing it is what caught
-follow-ups re-reasoning (40s → 1ms). It is run on demand rather than hosted, for the reasons above.
+follow-ups re-reasoning (40s → 1ms). It now runs as a deployed Railway worker rather than on a
+laptop, reasoning against live Gemini — confirmed by reading the gateway's own message log, where
+the deployed reply differs in wording from the recorded one, which is what proves it is generating
+rather than replaying.
 
 **Slack is implemented but has never delivered a message, and the block is upstream of this
 repo.** Being specific, because a vague "partially working" would be worth less than the facts:
@@ -439,9 +443,10 @@ collector that throws, hangs, or is unconfigured; a 429 storm; an unreachable da
 **Adoption / usage.** `bun install && bun run dev` is the whole quickstart — no API key, no
 database, no Docker — and it runs the real agent, not a mock. Every credential added upgrades a
 capability rather than unlocking a blank screen, so there is no cliff between "trying it" and "using
-it". Packaged as a container with a committed `Dockerfile` and `fly.toml`, both verified by building
-and running the image. Honest about reach: Telegram is verified live and run on demand rather than
-hosted, for the reasons given above.
+it". **Deployed and publicly reachable** as [@trace_b_bot](https://t.me/trace_b_bot) — a Railway
+worker reasoning against live Gemini, with `Dockerfile`, `railway.toml` and `fly.toml` committed so
+anyone can stand up their own in one command. The live path is verified end to end against the
+gateway's own message log, not asserted.
 
 **How Caspian fits.** See [How Caspian fits](#how-caspian-fits). One `CommClient`, one
 `handleMessage` that never branches on channel, `onInteraction` so a tap and a typed message are the
