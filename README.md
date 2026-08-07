@@ -181,6 +181,62 @@ Trace always tells you which one you are looking at: the report footer names the
 and reads `gemini-2.5-flash (replayed)` when it is a recording. A recording is never allowed to
 pass for live reasoning.
 
+## How Caspian fits
+
+Caspian is the communication layer, not a transport Trace happens to call. The test of that is
+what it would cost to add a channel: here it is one `connectX` line in `connectChannels` and
+nothing else — no handler, no renderer, no branch.
+
+```ts
+const client = new CommClient({ apiKey });        // one identity, every channel
+
+client.onMessage(async (message) => {
+  const reply = await handleMessage(deps, {       // the single handler
+    text: message.text,
+    channel: message.channel,
+    conversationId: message.conversationId,
+    sender: message.sender,
+  });
+  // `html` is null on purpose: plain prose plus provider-neutral blocks, rendered per channel
+  // by the gateway. Replying to the message is also what keeps the answer in its thread.
+  await message.reply(reply.text, null, reply.blocks ?? null);
+});
+
+// A button tap carries the text a user could have typed, so it takes the identical path.
+client.onInteraction(async (interaction) => {
+  const reply = await handleMessage(deps, { ...interaction, text: interaction.value });
+  await interaction.reply(reply.text, null, reply.blocks ?? null);
+});
+
+await client.listen({ ack: 'On it, one moment…' });
+```
+
+| Caspian surface | How Trace uses it |
+|---|---|
+| `onMessage` | **The** handler. `handleMessage(deps, message)` — one pure function, every channel. |
+| `onInteraction` | A button tap carries `value`, which is text a user could have typed, so a tap and a message take the *identical* path. No second code path to keep in sync. |
+| `listen({ ack })` | An outbound long poll. `ack` covers channels with no typing indicator — a reconstruction takes seconds, and silence reads as a broken bot. |
+| `connectTelegram` / `installSlack` | The connect helpers, called once in `connectChannels`. Slack's install is branded and reuses `SLACK_CONNECTION_ID`. |
+| `getConnection` | Checked at startup so a restart reuses the existing install instead of minting an orphan. |
+| `channelGuide(channel)` | Channel **etiquette**, fetched from Caspian and memoised per channel — Slack's mrkdwn is not standard markdown, X caps a post at 300 characters. Caspian maintains those rules, so this repo cannot drift from them. |
+| `initiate` | The only outbound-first path, to an operator allowlist, once per incident. |
+| `login` | Surfaced as a typed `AccountRequiredError` telling the operator to run `caspian login`. |
+| `Block[]` | Provider-neutral, so **one** renderer serves every channel: the gateway renders blocks natively on Slack, Discord and Telegram and degrades to clean text elsewhere. |
+| Threading | Caspian keeps `conversationId` stable per thread, which is what makes a bare `why` three messages later resolve to the right investigation. |
+
+Three consequences worth being explicit about, because they are the difference between using an SDK
+and building on it:
+
+- **One handler, provable.** `handleMessage` never reads `message.channel`. A test drives the same
+  script through Telegram and Slack and asserts identical `text` *and* `blocks` — the challenge
+  explicitly does not count one bot per platform, so this is a test rather than a claim.
+- **Channel-aware where it earns its place.** Rendering and etiquette branch on channel;
+  investigation logic never does. Asking Caspian how to behave on a channel is not the handler
+  branching — the same code path runs either way, only the wording guidance differs.
+- **Etiquette is fetched, not hardcoded.** `behaviorPrompt()` returns empty until an agent is
+  configured while `channelGuide(channel)` has real content — found by calling both against the
+  live gateway, which is why Trace fetches per channel.
+
 ## Design: why you can trust the output
 
 Eight invariants hold the product together. These are not style preferences — each one is enforced
@@ -344,6 +400,53 @@ simulating a 429 storm — and that is what found the serialiser printing `on pa
 payments-api`, relation ordering listing `E11` above `E2`, edges deduplicated for nodes but not for
 edges (one fact reading to the model as two independent observations), and the repository contract
 going 13 red against real Postgres while staying green in memory.
+
+## The four evaluation criteria
+
+**Problem it solves.** One concrete job: reconstruct a production incident and answer follow-ups
+about it. Not "AI for incidents" — the measurable 30–60 minutes an on-call engineer spends
+assembling context before anyone starts fixing. Trace explicitly does *not* fix, page-and-hope, or
+chat generally; it has one job and declines the rest, including free-form questions it cannot
+ground.
+
+**Code quality.** 463 tests running in ~180ms with no credentials, plus 499 against real Postgres in
+CI. Strict TypeScript with `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`; Biome bans
+`any` and non-null assertions. Dependencies point inwards — `packages/domain` is Zod-only with zero
+I/O and defines the repository *interfaces* that both storage backends implement, which is what lets
+the whole suite run in-memory in milliseconds. One repository contract suite is written once and run
+twice, in-memory and against Postgres; it went 13 red against real SQL while green in memory, which
+is the entire argument for writing it that way. Failure paths are exercised rather than assumed: a
+collector that throws, hangs, or is unconfigured; a 429 storm; an unreachable database.
+
+**Adoption / usage.** `bun install && bun run dev` is the whole quickstart — no API key, no
+database, no Docker — and it runs the real agent, not a mock. Every credential added upgrades a
+capability rather than unlocking a blank screen, so there is no cliff between "trying it" and "using
+it". Packaged as a container with a committed `Dockerfile` and `fly.toml`, both verified by building
+and running the image. Honest about reach: Telegram is verified live and run on demand rather than
+hosted, for the reasons given above.
+
+**How Caspian fits.** See [How Caspian fits](#how-caspian-fits). One `CommClient`, one
+`handleMessage` that never branches on channel, `onInteraction` so a tap and a typed message are the
+same path, provider-neutral `Block[]` so one renderer serves every channel, threading via a stable
+`conversationId`, and channel etiquette fetched from `channelGuide()` rather than hardcoded. Adding
+a channel is one `connectX` call and nothing else.
+
+## Secrets
+
+No secrets in git, and nothing hardcoded. Credentials enter only at the composition root
+(`apps/agent/src/wiring.ts`) and the two entrypoints (`main.ts`, `repl.ts`); every "is this
+configured?" decision lives there, so no other file asks what mode it is in. Library packages take
+configuration as a parameter rather than reading the environment — the one function with a default
+of `process.env` still accepts an explicit object, which is how the tests drive it.
+`.env` is gitignored and has never been tracked; `.dockerignore` keeps it out of the image,
+which was checked by looking inside the built image rather than by reading the file. Full history
+has been scanned for key shapes (`AIza`, `ghp_`, `github_pat_`, `xoxb-`, `xapp-`, bot-token
+patterns) with zero matches. Every variable is documented with the consequence of leaving it unset
+in [`.env.example`](.env.example), and none is required for the quickstart.
+
+Beyond git: `config_change` evidence carries a `redacted` flag so credential values never reach
+prompt text bound for a third-party model, and the Gemini API key travels in a header rather than
+the documented `?key=` query parameter, because a key in a URL reaches proxy logs.
 
 ## Explicitly out of scope
 
