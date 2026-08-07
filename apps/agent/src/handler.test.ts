@@ -380,3 +380,80 @@ describe('follow-ups reuse the report that was shown', () => {
     expect(reasonCalls).toBe(1);
   });
 });
+
+describe('a failed reasoner must not be permanent', () => {
+  /** A reasoner that fails until `fail` is cleared — a rate limit, not a broken deployment. */
+  function flaky() {
+    const state = { fail: true };
+    const real = defaultRecordedReasoner();
+    const subject = deps({
+      reasoner: {
+        name: 'flaky',
+        model: 'flaky-1',
+        reason: async (request) => {
+          if (state.fail) throw new Error('429 quota exceeded (transient)');
+          return await real.reason(request);
+        },
+      },
+    });
+    return { deps: subject, state };
+  }
+
+  test('re-asking after the rate limit clears gives a real report', async () => {
+    // A 429 is a normal Tuesday on a free tier. Storing the degraded report would make a transient
+    // outage permanent: `ready` is terminal, so every later ask returns the stored apology and the
+    // incident can never be reasoned about again.
+    const { deps: subject, state } = flaky();
+
+    const down = await handleMessage(subject, inbound('investigate INC-481', 'c:1'));
+    expect(down.text).toContain('could not reason about it');
+
+    state.fail = false;
+    const back = await handleMessage(subject, inbound('investigate INC-481', 'c:2'));
+
+    expect(back.text).toContain('Most likely');
+    expect(back.text).not.toContain('could not reason about it');
+  });
+
+  test('does not persist a report it could not reason about', async () => {
+    const { deps: subject } = flaky();
+
+    await handleMessage(subject, inbound('investigate INC-481', 'c:1'));
+
+    const investigation = await subject.store.investigations.findByExternalRef(subject.tenant, {
+      system: 'pagerduty',
+      id: 'INC-481',
+    });
+    expect(investigation).toBeDefined();
+    if (investigation) {
+      expect(await subject.store.reports.findFor(subject.tenant, investigation.id)).toBeUndefined();
+    }
+  });
+
+  test('does not fingerprint the incident by its own error message', async () => {
+    // `similaritySourceText` folds the report summary into the embedding. Indexing "could not
+    // reason about it: 429 quota exceeded" would make this incident's nearest neighbour every
+    // *other* incident that hit a rate limit, which is a confident, wrong "we have seen this
+    // before" — the worst possible answer to that question.
+    const indexed: string[] = [];
+    const { deps: subject } = flaky();
+    const spying: AgentDeps = {
+      ...subject,
+      embedder: {
+        model: 'spy-1',
+        minSimilarity: 0.9,
+        embed: async (text: string) => {
+          indexed.push(text);
+          return [1, 0, 0];
+        },
+      },
+    };
+
+    await handleMessage(spying, inbound('investigate INC-481', 'c:1'));
+
+    expect(indexed.length).toBeGreaterThan(0);
+    for (const text of indexed) expect(text).not.toContain('could not reason about it');
+    // The real fingerprint survives: services and error signatures come off the graph.
+    expect(indexed.some((text) => text.includes('payments-api'))).toBe(true);
+  });
+});

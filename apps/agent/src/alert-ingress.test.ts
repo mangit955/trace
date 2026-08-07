@@ -115,3 +115,30 @@ describe('receiving an alert', () => {
     expect((await receiveAlert(noChannel, payload)).notified).toBe(0);
   });
 });
+
+describe('paging when reasoning failed', () => {
+  test('does not promise a reconstruction that has already finished', async () => {
+    // With no leading hypothesis the page used to fall back to "I am reconstructing what happened
+    // now." That is false the moment reasoning fails rather than stalls: the reconstruction is
+    // done, and someone woken at 3am would sit waiting for a follow-up that never arrives.
+    const failing = ingress(['ops@acme.com']);
+    failing.agent = {
+      ...failing.agent,
+      reasoner: {
+        name: 'failing',
+        model: 'failing-1',
+        reason: async () => {
+          throw new Error('429 quota exceeded');
+        },
+      },
+    };
+
+    await receiveAlert(failing, payload);
+
+    expect(failing.paged).toEqual(['ops@acme.com']);
+    expect(failing.pagedText[0]).not.toContain('reconstructing what happened now');
+    // It points at the thing that *is* available, which is the timeline.
+    expect(failing.pagedText[0]).toContain('could not reach a conclusion');
+    expect(failing.pagedText[0]).toMatch(/\d+ events/);
+  });
+});

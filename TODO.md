@@ -353,7 +353,7 @@ The spine. Zod only, zero I/O.
       with a `pgvector/pgvector:pg17` service container and `TRACE_TEST_DATABASE_URL`, so
       `describeStoreContract` runs against real SQL — the job that would have caught Phase 5's 13
       Postgres-only failures. Both pinned to `oven-sh/setup-bun@v2` and bun 1.3.13. Proven locally
-      first; CI reports **495 pass, 0 skip**. The count is the check, not the tick: a run that had
+      first; CI reports **499 pass, 0 skip**. The count is the check, not the tick: a run that had
       silently skipped Postgres would be just as green.
 - [x] Four defects found by running it, none of which the suite could see, all now tested:
       1. **A free-form question on the credential-free path returned bare help text.**
@@ -374,6 +374,36 @@ The spine. Zod only, zero I/O.
       4. A 429 storm dumped a **stack trace** through Bun's internals for similarity indexing — a
          feature explicitly designed to fail quietly. Every other `console.error` in the repo logs
          `error.message`; these two logged the object.
+- [x] **Integrity review of the above, which found three defects in the fix itself.** The degraded
+      report was the right idea implemented three ways wrong, and all three were invisible to the
+      suite that had just gone green:
+      1. **A transient failure became permanent.** The degraded report was *stored*, and a stored
+         report is never regenerated while `ready` is terminal — so a single 429 meant every later
+         ask replayed the apology and that incident could never be reasoned about again. This was a
+         regression against the previous behaviour, where the failure left the investigation in
+         `reasoning` and a retry worked. Proven by driving a reasoner that fails once and then
+         recovers: run 1 degraded, run 2 **still** degraded. Now: degraded reports are shown and
+         never written, so the next ask reasons over the same immutable evidence and succeeds the
+         moment the quota returns. Run 2 now reads `REASONED — recovered`, and `why` after it gives
+         real reasoning.
+      2. **The incident was fingerprinted by its own error message.** `similaritySourceText` folds
+         the report summary into the embedding, so a degraded incident was indexed as *"could not
+         reason about it: 429 quota exceeded"* — making its nearest neighbour every other incident
+         that hit a rate limit, i.e. a confident and completely wrong "we have seen this before".
+         `SimilaritySourceInput.report` was already optional and documented *"Absent when reasoning
+         failed"*; the intent existed and the new code simply never honoured it. Fixed on both the
+         index and the query side, including the second call site on the already-`ready` path.
+      3. **The page said "I am reconstructing what happened now."** With no leading hypothesis the
+         alert fell through to that default, which is false the moment reasoning *fails* rather
+         than stalls — someone woken at 3am would wait for a follow-up that never comes, while the
+         timeline they could use sat one "why" away. Test confirmed to bite by reverting the fix.
+      Also caught here: `reasoned` is now returned explicitly rather than inferred from
+      `hypotheses.length === 0`. That inference holds today only because `ReasonedOutput` requires
+      `.min(1)` hypotheses in a zod schema two packages away, and the failure mode of that coupling
+      silently breaking is a degraded report stored as final.
+      One more from this pass, and the reason `bun run typecheck` is not optional: a stub `Embedder`
+      in a new test set a `name` property the interface does not have. `bun test` passed it; `tsc`
+      caught it.
 
 ---
 
@@ -381,7 +411,7 @@ The spine. Zod only, zero I/O.
 
 - [x] `bun test` green: serializer determinism, citation validator rejects hallucinated ids, state
       machine rejects illegal transitions, registry namespacing, `assertValidEvidenceKind` across
-      all core kinds. **459 pass / 1 skip** credential-free, **495 pass** with
+      all core kinds. **463 pass / 1 skip** credential-free, **499 pass** with
       `TRACE_TEST_DATABASE_URL` set; typecheck clean across all five workspaces; `bun run lint`
       exits 0 with no warnings.
 - [x] End-to-end with **no database and no credentials**: `bun run dev` gives a cited report for

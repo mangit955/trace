@@ -81,7 +81,13 @@ export async function receiveAlert(
     summary: alert.summary,
     ...(leading
       ? { finding: `Most likely (${Math.round(leading.confidence * 100)}%): ${leading.statement}` }
-      : {}),
+      : {
+          // No hypothesis means reasoning failed, *not* that it is still running. The default
+          // "I am reconstructing what happened now" would page someone to wait for a follow-up
+          // that is never coming — and the reconstruction they could actually use is already
+          // sitting there, one "why" away.
+          finding: `I reconstructed ${report.timeline.length} events but could not reach a conclusion. Ask me for the timeline.`,
+        }),
   };
 
   await notifyOnCall({
