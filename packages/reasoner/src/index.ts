@@ -14,6 +14,14 @@
 
 export { type AnswerQuestionInput, answerQuestion, NoAnswererError } from './answer.ts';
 export {
+  EMBEDDING_DIMENSIONS,
+  type Embedder,
+  type GeminiEmbedderOptions,
+  geminiEmbedder,
+  lexicalEmbedder,
+  selectEmbedder,
+} from './embed.ts';
+export {
   type GeminiReasonerOptions,
   geminiReasoner,
 } from './gemini.ts';
@@ -40,4 +48,5 @@ export {
   type SelectReasonerInput,
   selectReasoner,
 } from './select.ts';
+export { type SimilaritySourceInput, similaritySourceText } from './similar.ts';
 export type { ReportRepository } from './store.ts';

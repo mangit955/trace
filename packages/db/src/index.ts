@@ -7,3 +7,6 @@
  */
 
 export { InMemoryStore } from './memory.ts';
+export { type MigrationResult, migrate } from './migrate.ts';
+export { PostgresStore } from './postgres.ts';
+export type { TraceStore } from './store.ts';

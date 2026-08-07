@@ -72,6 +72,62 @@ export interface HypothesisRepository {
 }
 
 /**
+ * "Has this happened before?" — nearest-neighbour lookup over investigation-level embeddings.
+ *
+ * The port takes a vector and returns neighbours; it never makes one. Embedding is a model
+ * concern and lives behind `Embedder` in the reasoner, so storage stays free of the question of
+ * which provider is configured — and the in-memory implementation stays a real implementation
+ * rather than a stub that only Postgres can satisfy.
+ *
+ * Investigation-level rather than per-node: one vector per incident over affected services, error
+ * signature and summary. Embedding every evidence node would cost far more and mostly retrieve
+ * noise — two unrelated incidents both deployed something on a Tuesday.
+ */
+export interface SimilarInvestigation {
+  investigationId: InvestigationId;
+  externalRef: ExternalRef;
+  /** Cosine similarity in [0, 1]. Higher is closer. */
+  score: number;
+}
+
+export interface IndexInvestigationInput {
+  investigationId: InvestigationId;
+  embedding: readonly number[];
+  /** The text the vector was made from, kept so a stale embedding is recognisable. */
+  sourceText: string;
+  model: string;
+}
+
+export interface FindSimilarInput {
+  embedding: readonly number[];
+  /**
+   * The model that produced `embedding`. Required, and matched exactly.
+   *
+   * Two embedding models do not share a vector space, so a cosine similarity computed across them
+   * is not a weak signal — it is a meaningless number that still sorts. An operator who adds
+   * `GEMINI_API_KEY` to a deployment that had been indexing lexically ends up with both kinds in
+   * one table, and without this filter a genuine precedent scores 0.49 against a query it should
+   * have matched. Found by reading the scores in a live table, not by a test.
+   *
+   * The consequence is deliberate: after a model change, precedent goes quiet until incidents are
+   * re-indexed. Silence is the right failure here — a wrong "we have seen this before" sends an
+   * on-call engineer down a path that has nothing to do with the incident in front of them.
+   */
+  model: string;
+  limit: number;
+  /** The investigation being explained. It is trivially its own nearest neighbour. */
+  exclude?: InvestigationId;
+}
+
+export interface InvestigationSimilarityRepository {
+  index(ctx: TenantContext, input: IndexInvestigationInput): Promise<void>;
+  findSimilar(
+    ctx: TenantContext,
+    input: FindSimilarInput,
+  ): Promise<readonly SimilarInvestigation[]>;
+}
+
+/**
  * Maps a Caspian conversation to the investigation being discussed in it.
  *
  * This is what lets a bare "why?" resolve. Threading is per-channel and handled by Caspian; this

@@ -1,5 +1,5 @@
 import { handleMessage } from './handler.ts';
-import { buildDeps } from './wiring.ts';
+import { buildDeps, openStore } from './wiring.ts';
 
 /**
  * Trace in a terminal — `bun run dev`.
@@ -13,11 +13,14 @@ import { buildDeps } from './wiring.ts';
  * asserted — a second implementation for local use would defeat the point entirely.
  */
 
-const deps = buildDeps();
+// In-memory unless DATABASE_URL is set, in which case this REPL is also how you check the
+// Postgres path by hand.
+const deps = buildDeps(process.env, await openStore());
 const conversationId = `local:${Date.now()}`;
 
 console.log('Trace — incident investigator. I reconstruct incidents; I do not fix them.');
 console.log(`Reasoning: ${deps.reasoner.model}`);
+console.log(`Storage:   ${process.env['DATABASE_URL'] ? 'postgres' : 'in-memory'}`);
 console.log('Try: investigate INC-481   then: why   ·   Ctrl-C to quit\n');
 
 const prompt = '> ';

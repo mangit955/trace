@@ -255,14 +255,70 @@ The spine. Zod only, zero I/O.
 
 - [x] In-memory repository implementations (back the demo and the entire test suite) — **done in
       Phase 4**, because the agent needed real ports rather than a throwaway map
-- [ ] Postgres migrations: `orgs`, `investigations` (unique `org_id + external_ref`),
-      `evidence_nodes` (unique `investigation_id + content_hash`; index
-      `(investigation_id, occurred_at)`; GIN on payload), `evidence_edges`, `collector_runs`,
-      `hypotheses`, `hypothesis_citations`, `services`, `service_dependencies`
-- [ ] Postgres repository implementations
-- [ ] pgvector: investigation-level embeddings (affected services + error signature + summary) for
-      "has this happened before?" — not per-node, which would be costly and mostly noise
-- [ ] Same repository test suite runs against both implementations
+- [x] `TraceStore` — the interface both stores satisfy, so `AgentDeps` names a contract rather than
+      a class. Plus the defect that made the rest of this phase meaningless: `wiring.ts` minted
+      `newId(OrgId)` on **every start**, invisible in memory and silently fatal against Postgres —
+      the data survives a restart and every read filters it out. Now `TRACE_ORG_ID` with a fixed
+      single-tenant default, refused at startup if it is not a UUID.
+- [x] Postgres migrations, plain numbered `.sql` + a ~60-line runner (no migration-tool dependency):
+      `orgs`, `investigations` (unique `org_id + external_system + external_id`), `evidence_nodes`
+      (unique `investigation_id + dedupe_key`; index `(investigation_id, occurred_at)`; GIN on
+      payload), `evidence_edges` (PK is the dedupe identity), `collector_runs`, `hypotheses`,
+      `hypothesis_citations` (ordered by `position`), `investigation_reports`, `conversation_links`.
+      Each file applies in a transaction and is recorded in `schema_migrations`, so re-running is a
+      no-op — verified by running it twice.
+      *Deviations from the original plan, both deliberate:* **`dedupe_key` not `content_hash`**,
+      following Phase 1 — identity is already the logical key, so there is no hash and no collision
+      risk; and **no `services` / `service_dependencies`**, which have no port, no entity and no
+      writer (service topology is evidence today). Empty tables nothing writes to are dead schema
+      that later reads as a bug.
+- [x] Postgres repository implementations over `Bun.SQL` — zero new dependencies. Rows are parsed
+      back through the domain's zod schemas rather than cast, which is what caught all three of the
+      defects below at the boundary instead of inside a renderer.
+- [x] pgvector: investigation-level embeddings (affected services + error signature + summary), one
+      vector per incident, HNSW over cosine. `Embedder` port beside `Reasoner`: `geminiEmbedder`
+      (`gemini-embedding-001`, 768-d, key in a header) with a **`lexicalEmbedder`** fallback — a
+      deterministic hashed bag of tokens — so "has this happened before?" still answers with zero
+      credentials. Wired end to end, not merely built: `runInvestigation` indexes and looks up, and
+      `renderReport` gains a "Similar past investigations" section.
+- [x] Same repository test suite runs against both implementations — `describeStoreContract` in
+      `packages/db/src/contract.ts`, called by `memory.test.ts` and `postgres.test.ts`. The Postgres
+      run is skipped unless `TRACE_TEST_DATABASE_URL` is set, so the default suite stays
+      credential-free and runs in milliseconds.
+- [x] `docker-compose.yml` pulled forward from Phase 6 (pgvector/pgvector:pg17, port 5433), because
+      none of the above could be verified without it.
+- [x] Validation pass, by running it. The contract suite went **13 red against real Postgres while
+      green in memory** — which is the entire justification for writing it once and running it
+      twice. Three defects, all one lesson (*Bun's SQL client decodes scalars, not composite
+      types*), none of which any in-memory test could reach:
+      1. a JS `number[]` bound to a `vector` column serialises as a Postgres *array* literal
+         (`{1,2}`), which pgvector rejects — vectors need the bracketed text form and a `::vector`
+         cast;
+      2. the same for `uuid[]`: Bun expands a bound array into a value list, so `evidence_seen`
+         arrived as `malformed array literal`;
+      3. `uuid[]` and `jsonb` come *back* as raw text, so an evidence payload read as a string and a
+         stored timeline had no `.map`.
+      A fourth was found only by rendering it: the precedent threshold was one constant for both
+      embedders, and Gemini scores *unrelated* incident text above 0.87 — so "broken image links
+      after a CMS migration" showed as **87% similar** to a Redis outage. The floor is now a
+      property of the `Embedder`, measured against the real pipeline query (the first calibration
+      used hand-written text and set a floor that excluded a genuine match).
+      A fifth came out of the verification pass, from reading scores in a live table: `findSimilar`
+      filtered on tenant but **not on the embedding model**, so a table holding both kinds — which
+      is what you get the moment a key is added to a deployment that had been indexing lexically —
+      compared vectors from two different spaces. A `lexical-v1` incident scored 0.4943 against a
+      Gemini query that should have matched it. The `model` column already existed for this reason
+      and nothing read it; the query now matches on it in both stores.
+      The same pass also caught an over-claim of mine: the byte-identical serialization check had
+      compared a reloaded graph against *another reloaded* graph, proving determinism and not the
+      round-trip. Redone fresh-vs-reloaded, it holds at 3070 bytes.
+      Verified holding: 482 tests green with Postgres and 447 without; migrations idempotent;
+      restart returns the *stored* report with identical hypotheses and adds no second investigation
+      row; a reloaded graph serialises byte-identically and its 14 citations still resolve with none
+      dangling; re-collection leaves nodes and edges singular (17/14); tenant isolation on real SQL;
+      an unreachable database gives an actionable error with the password redacted rather than a
+      Bun stack trace; and a stock `postgres:17` image fails `0002` loudly while `0001` stays
+      committed, naming pgvector as the fix.
 
 ## Phase 6 — Ship
 
@@ -270,6 +326,8 @@ The spine. Zod only, zero I/O.
 - [ ] `docker compose up` — Postgres path
 - [ ] `.env.example` — `CASPIAN_API_KEY` (free/instant, the only required one), `GEMINI_API_KEY`,
       `TELEGRAM_BOT_TOKEN`, `GITHUB_TOKEN`, `TRACE_ONCALL_RECIPIENTS`, `DATABASE_URL`,
+      `TRACE_ORG_ID` (leave unset for the single-tenant default; changing it after data exists hides
+      every investigation already stored),
       `TRACE_ENABLE_SLACK`, `SLACK_CONNECTION_ID` (printed by the first Slack install; saving it is
       what stops the next start minting a second one), `TRACE_SLACK_DISPLAY_NAME`,
       `TRACE_SLACK_ICON_URL`, `TRACE_ALERT_PORT`
@@ -290,7 +348,9 @@ The spine. Zod only, zero I/O.
 - [x] End-to-end with **no database and no credentials**: `bun run dev` gives a cited report for
       `investigate INC-481`, and `why` resolves to that thread. Also verified over live Telegram
       with credentials present.
-- [ ] Same flow against `docker compose up` with Postgres
+- [x] Same flow against `docker compose up` with Postgres: `investigate INC-481`, `why` and a
+      free-form question all answered against the database, and a **restart** returns the stored
+      report rather than re-reasoning
 - [ ] Multi-channel: same investigation reachable from Telegram and Slack through one handler.
       Proven in test — one script driven through both channels asserts identical `text` *and*
       `blocks` — and live on Telegram, but **not** live on Slack: no Slack message has ever reached
