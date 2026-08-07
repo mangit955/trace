@@ -170,7 +170,7 @@ The spine. Zod only, zero I/O.
 - [x] Verified live against the real API twice (capture + composed Phase 4 wiring): header auth and
       the hand-written schema are both accepted, and the model reached 0.95–0.98 on the true cause
       while ranking the seeded decoy at 0.10 with `contradicts` citations against it.
-- [ ] Note for Phase 6: Bun loads `.env` from the **working directory**, so `bun run dev` must be
+- [x] Note for Phase 6: Bun loads `.env` from the **working directory**, so `bun run dev` must be
       run from the repo root or the agent will silently replay recordings instead of reasoning live.
 
 ## Phase 4 — `apps/agent` (the graded surface)
@@ -460,7 +460,8 @@ The spine. Zod only, zero I/O.
 
 ## Submission
 
-- [ ] Public repo, README complete
+- [x] Public repo, README complete — `github.com/mangit955/trace`, Phase 6 merged to `main` and CI
+      green on the merge commit
 - [ ] Comment on the challenge issue with: agent name + 2–3 sentence problem statement, repo link,
       how to talk to it (Telegram handle + local run steps), channels used, note on the four criteria
 - [ ] **Do NOT open a PR against the Caspian repo for the agent itself** — the brief forbids it
