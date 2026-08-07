@@ -119,21 +119,41 @@ bun start
 `CASPIAN_API_KEY` is the only credential `bun start` requires. Everything else degrades gracefully
 — see the table below.
 
-**Telegram: [@trace_b_bot](https://t.me/trace_b_bot)** — say `investigate INC-481`, then `why`, then
-ask it anything about the incident. Replies render natively as headings, fields, a timeline list and
-deep-link buttons to the real deploy/PR/commit, with a `Why?` button that continues the thread.
+The bot is **[@trace_b_bot](https://t.me/trace_b_bot)** on Telegram — `investigate INC-481`, then
+`why`, then ask it anything about the incident. Replies render natively as headings, fields, a
+timeline list and deep-link buttons to the real deploy/PR/commit, with a `Why?` button that
+continues the thread.
+
+> **It is run on demand, not hosted 24/7 — so if it does not answer, it is not running, and that is
+> the expected state rather than a bug.** Reviewers: the terminal quickstart above is the same agent
+> through the same handler and needs nothing but Bun, so nothing here requires a live bot to
+> evaluate. Happy to bring it up for a scheduled window — open an issue and say when.
+
+This is a deliberate choice, not an unfinished one. The free always-on PaaS tier has effectively
+disappeared: Fly and Railway now require a card, Northflank and Render do too, Koyeb's free instance
+cannot run worker services and force-sleeps after an hour, and Hugging Face now bills Docker Spaces.
+Every remaining free option sleeps on inactivity — and because Trace receives no inbound HTTP by
+design (see below), sleeping is exactly what they would do. A bot that is silently asleep when a
+reviewer messages it is worse than one that is honestly documented as off.
 
 ### Deploying it
 
-There is a `Dockerfile` and a `fly.toml`. The image is host-agnostic — anywhere that runs a
-container works — but note the constraint below if you use something other than Fly.
+It is packaged and ready — `Dockerfile` and `fly.toml` are committed and both were verified by
+building and running the image. The image is host-agnostic; any container host works.
 
 ```bash
 brew install flyctl && fly auth login       # or: curl -L https://fly.io/install.sh | sh
-fly launch --no-deploy --copy-config        # keeps the committed fly.toml
+fly launch --no-deploy --copy-config --region iad
 fly secrets set CASPIAN_API_KEY=… TELEGRAM_BOT_TOKEN=… GEMINI_API_KEY=…
 fly deploy
+fly status                                  # the machine must read "started"
 fly logs                                    # expect: "[trace] telegram connected (active)"
+```
+
+Or anywhere else that runs a container:
+
+```bash
+docker build -t trace . && docker run --env-file .env trace
 ```
 
 > **The machine must never scale to zero.** Caspian's `listen()` is an *outbound* long poll — Trace
@@ -265,7 +285,9 @@ notification. Once per incident, allowlist only, and silent unless both variable
 
 **Telegram is verified live** as [@trace_b_bot](https://t.me/trace_b_bot): `investigate`, `why`,
 free-form questions, native block rendering, deep-link buttons, and Caspian auto-threading each
-reply.
+reply. Verified means *observed working over a real Telegram conversation*, not asserted — reading
+that conversation is what caught the `/start` and ack defects, and timing it is what caught
+follow-ups re-reasoning (40s → 1ms). It is run on demand rather than hosted, for the reasons above.
 
 **Slack is implemented but has never delivered a message, and the block is upstream of this
 repo.** Being specific, because a vague "partially working" would be worth less than the facts:

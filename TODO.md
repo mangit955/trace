@@ -345,9 +345,24 @@ The spine. Zod only, zero I/O.
       poll, so a host that stops the container on "no HTTP traffic" silently kills the bot. My first
       draft had a `[machine] auto_destroy` block — checked against Fly's config reference and there
       is no such section; removed.
-- [ ] Deploy the Telegram bot (running locally as **@trace_b_bot**, connection active). Dockerfile
-      and fly.toml ready; `flyctl` is not installed on this machine, so the deploy itself is the
-      operator's to run. README carries the exact command sequence.
+- [x] Telegram bot **packaged but deliberately not hosted**, and the README says so where a reviewer
+      will read it. Attempted on Fly, which now requires a payment method before it will run
+      machines. Surveyed the alternatives rather than assuming one would do: Koyeb's free instance
+      cannot run worker services *and* force-sleeps after an hour with no way to disable it (free
+      tier also closed to new signups post-Mistral); Northflank and Render require a card; Hugging
+      Face now bills Docker Spaces and free hardware sleeps at 48h regardless; Oracle Always Free is
+      genuinely always-on but needs card verification and is a VM to administer.
+      Every remaining free option **sleeps on inactivity**, and Trace receives no inbound HTTP by
+      design — `listen()` is an outbound long poll — so sleeping is precisely what they would do.
+      A bot that is silently asleep when a reviewer messages it reads as broken, which is strictly
+      worse than one documented as run-on-demand. So: `@trace_b_bot` is stated as on-demand in both
+      the quickstart and the channel-status section, with the note that the terminal path is the
+      same agent through the same handler and needs no live bot to evaluate.
+      The packaging is real and verified, not aspirational: `docker build` + `docker run --env-file`
+      both exercised, exiting 1 with actionable guidance on a missing key and on no channel
+      configured. A first `fly launch` attempt failed with `region any not found` — the checkout was
+      on `main`, where `fly.toml` does not exist, so flyctl fell back to its NodeJS scanner and had
+      no `primary_region`. Worth remembering: that error names the region, not the missing config.
 - [x] CI — `.github/workflows/ci.yml`, two jobs on push and PR. **check**: `bun test`, `bun run
       typecheck`, `bun run lint` (all three; the runner strips types). **postgres**: the same suite
       with a `pgvector/pgvector:pg17` service container and `TRACE_TEST_DATABASE_URL`, so
